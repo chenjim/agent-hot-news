@@ -24,8 +24,12 @@ class Settings(BaseSettings):
     # OpenAI
     OPENAI_API_KEY: str = ""
     OPENAI_BASE_URL: str = "https://api.openai.com/v1"
-    OPENAI_EMBEDDING_MODEL: str = "nvidia/llama-nemotron-embed-vl-1b-v2:free"
     OPENAI_CHAT_MODEL: str = "deepseek/deepseek-v4-flash"
+
+    OPENAI_EMBEDDING_API_KEY: str = ""  # empty = fallback to OPENAI_API_KEY
+    OPENAI_EMBEDDING_BASE_URL: str = ""  # empty = fallback to OPENAI_BASE_URL
+    OPENAI_EMBEDDING_MODEL: str = "nvidia/llama-nemotron-embed-vl-1b-v2:free"
+
     # Local LLM fallback
     LOCAL_LLM_URL: str = "http://localhost:11434/api/generate"
     LOCAL_LLM_MODEL: str = "qwen2.5:14b"

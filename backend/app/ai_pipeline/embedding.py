@@ -13,8 +13,9 @@ BATCH_INTERVAL = 2.0  # seconds between batches to avoid rate limits
 
 class EmbeddingService:
     def __init__(self):
-        self.api_key = settings.OPENAI_API_KEY
-        self.base_url = settings.OPENAI_BASE_URL.rstrip("/")
+        self.api_key = settings.OPENAI_EMBEDDING_API_KEY or settings.OPENAI_API_KEY
+        _url = settings.OPENAI_EMBEDDING_BASE_URL or settings.OPENAI_BASE_URL
+        self.base_url = _url.rstrip("/")
         self.model = settings.OPENAI_EMBEDDING_MODEL
 
     async def embed_texts(self, texts: List[str]) -> List[List[float]]:
