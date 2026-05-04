@@ -12,6 +12,23 @@ services:
       timeout: 3s
       retries: 5
 
+  postgres:
+    image: pgvector/pgvector:pg17
+    container_name: hotnews-postgres
+    ports:
+      - "51132:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    environment:
+      POSTGRES_USER: hotnews
+      POSTGRES_PASSWORD: hotnews
+      POSTGRES_DB: hotnews
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U hotnews -d hotnews"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
   frontend:
     build:
       context: ./frontend
@@ -27,3 +44,4 @@ services:
 
 volumes:
   redis_data:
+  pgdata:

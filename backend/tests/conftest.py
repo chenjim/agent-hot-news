@@ -19,6 +19,15 @@ TEST_DATABASE_URL = "sqlite:///:memory:"
 
 @pytest.fixture(scope="session")
 def engine():
+    # Replace VectorType with JSON for SQLite test compatibility
+    @event.listens_for(Base.metadata, "before_create")
+    def _replace_vector_type(target, connection, **kw):
+        for table in target.tables.values():
+            for col in list(table.columns):
+                if hasattr(col.type, 'dim'):  # VectorType
+                    from sqlalchemy import JSON
+                    col.type = JSON()
+
     engine = create_engine(
         TEST_DATABASE_URL,
         connect_args={"check_same_thread": False},

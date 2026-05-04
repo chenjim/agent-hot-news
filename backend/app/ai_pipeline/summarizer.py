@@ -1,3 +1,4 @@
+import asyncio
 import json
 from typing import List, Dict, Optional
 import httpx
@@ -8,24 +9,29 @@ settings = get_settings()
 
 
 class SummarizerService:
+    """LLM summarization with rate-limit-aware retries."""
+
     def __init__(self):
         self.api_key = settings.OPENAI_API_KEY
         self.base_url = settings.OPENAI_BASE_URL.rstrip("/")
         self.model = settings.OPENAI_CHAT_MODEL
+        self._sem = asyncio.Semaphore(2)  # max 2 concurrent LLM calls
+        self._last_call = 0.0
+
+    async def _wait_if_needed(self):
+        """Ensure minimum interval between calls to avoid rate limits."""
+        now = asyncio.get_event_loop().time()
+        elapsed = now - self._last_call
+        min_interval = 3.0  # seconds between calls
+        if elapsed < min_interval:
+            await asyncio.sleep(min_interval - elapsed)
+        self._last_call = asyncio.get_event_loop().time()
 
     async def summarize_cluster(
         self,
         titles: List[str],
         summaries: List[str],
     ) -> Dict[str, Optional[str]]:
-        """
-        Given a cluster of article titles and summaries, generate:
-        - title: 5-word event title
-        - summary: one-sentence description
-        - category: tech/finance/social/global/other
-        - sentiment: positive/negative/neutral
-        - entities: list of key entities
-        """
         content_samples = "\n".join(
             f"- {t}\n  {s[:200]}" for t, s in zip(titles, summaries) if s
         )
@@ -75,15 +81,24 @@ class SummarizerService:
             "X-Title": "Agent Hot News",
         }
 
-        max_retries = 2
+        max_retries = 3
         for attempt in range(max_retries):
             try:
-                async with httpx.AsyncClient(timeout=60.0) as client:
-                    resp = await client.post(
-                        f"{self.base_url}/chat/completions",
-                        headers=headers,
-                        json=payload,
-                    )
+                async with self._sem:
+                    await self._wait_if_needed()
+                    async with httpx.AsyncClient(timeout=60.0) as client:
+                        resp = await client.post(
+                            f"{self.base_url}/chat/completions",
+                            headers=headers,
+                            json=payload,
+                        )
+
+                    if resp.status_code == 429:
+                        retry_after = int(resp.headers.get("Retry-After", 5))
+                        logger.warning(f"Rate limited (429), waiting {retry_after}s...")
+                        await asyncio.sleep(retry_after)
+                        continue
+
                     resp.raise_for_status()
                     data = resp.json()
 
@@ -94,7 +109,6 @@ class SummarizerService:
                 if not raw:
                     raise RuntimeError("API returned empty content")
 
-                # Extract JSON from markdown code block if present
                 if "```json" in raw:
                     raw = raw.split("```json")[1].split("```")[0].strip()
                 elif "```" in raw:
@@ -114,12 +128,13 @@ class SummarizerService:
                 return result
 
             except Exception as e:
+                wait = 2 ** attempt  # 1s, 2s, 4s
                 if attempt < max_retries - 1:
-                    logger.warning(f"Summarization attempt {attempt + 1} failed: {e}, retrying...")
+                    logger.warning(f"Summarization attempt {attempt + 1} failed: {e}, retry in {wait}s...")
+                    await asyncio.sleep(wait)
                     continue
                 logger.error(f"Summarization failed after {max_retries} attempts: {e}")
 
-        # Fallback
         return {
             "title": titles[0][:20] if titles else "未知事件",
             "summary": summaries[0][:60] if summaries else "暂无摘要",

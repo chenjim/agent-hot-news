@@ -7,6 +7,7 @@ python-multipart==0.0.17
 sqlalchemy==2.0.36
 alembic==1.14.0
 psycopg2-binary==2.9.10
+pgvector==0.3.6
 redis==5.2.0
 
 # AI / ML

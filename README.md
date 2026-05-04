@@ -51,6 +51,19 @@
 
 结果展示的是"事件"而非"文章"，每个事件包含：标题、摘要、分类、情感、关键实体、来源列表。
 
+#### Embedding 模型选择
+
+默认使用 NVIDIA `llama-nemotron-embed-vl-1b-v2:free`（2048 维），可通过 `.env` 切换：
+
+| 模型 | 维度 | 特点 |
+|------|------|------|
+| `nvidia/llama-nemotron-embed-vl-1b-v2:free` | 2048 | 当前默认，多语言，免费 |
+| `text-embedding-3-small` | 1536 | OpenAI 出品 |
+| `bge-m3` | 1024 | 中文优化好，BAAI 出品 |
+| `qwen3-embedding` | 4096 | 阿里出品，MTEB 多语言榜 #1 |
+
+更换模型后需同步更新 `.env` 中的 `EMBEDDING_DIMENSION` 并重建数据库迁移。
+
 ### 实时推送
 
 通过 SSE (Server-Sent Events)，前端可以在新热点出现或排名大幅变动时实时收到通知，适合作为"新闻监控大盘"挂在显示器上。
@@ -68,8 +81,8 @@
 
 - Python 3.12+
 - Node.js 18+
-- Docker (用于 Redis 和前端)
-- OpenAI API Key 或 OpenRouter API Key（支持 DeepSeek、OpenAI 等多模型）
+- Docker（PostgreSQL + Redis + 前端）
+- OpenRouter API Key（支持 OpenAI、DeepSeek 等多模型，免费额度可用）
 
 ### 1. 克隆并配置
 
@@ -89,9 +102,10 @@ cp .env.example .env  # 如无 .env.example，手动创建 .env
 ```
 
 这会启动：
+- **PostgreSQL 17 + pgvector** (localhost:51132) — 向量存储 + HNSW 索引
 - **Redis** (localhost:51179) — API 缓存
 - **前端** (localhost:51130) — React 应用
-- **后端** (localhost:51180) — FastAPI，自动创建 venv 并通过 systemd 管理
+- **后端** (localhost:51180) — FastAPI，自动创建 venv、执行 DB 迁移，并通过 systemd 管理
 
 访问 http://localhost:51130 即可看到热点大盘。
 
@@ -110,13 +124,13 @@ cp .env.example .env  # 如无 .env.example，手动创建 .env
                        ▼
 ┌──────────────────────────────────────────────────────┐
 │                  原始文章库                           │
-│              SQLite (dev) / PostgreSQL                │
+│           PostgreSQL + pgvector (向量存储)             │
 └──────────────────────┬───────────────────────────────┘
                        ▼
 ┌──────────────────────────────────────────────────────┐
 │                   AI Pipeline                        │
-│   1. Embedding (NVIDIA via OpenRouter)              │
-│   2. DBSCAN 聚类 (相似内容归组)                       │
+│   1. Embedding (NVIDIA via OpenRouter, 2048 维)     │
+│   2. DBSCAN 聚类 (cosine 距离, 相似归组)             │
 │   3. DeepSeek LLM 总结 (OpenRouter, 提炼要点)       │
 │   4. 热度评分 (多维度加权)                            │
 └──────────────────────┬───────────────────────────────┘

@@ -134,24 +134,39 @@ class AIPipeline:
         return round(max(0, score), 2)
 
     def _find_similar_event(self, centroid: List[float]) -> HotEvent:
-        """Find an existing event with similar centroid."""
-        recent_events = (
-            self.db.query(HotEvent)
-            .filter(HotEvent.last_updated_at >= datetime.now(timezone.utc) - timedelta(hours=48))
-            .all()
-        )
+        """Find an existing event with similar centroid using pgvector cosine distance."""
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=48)
 
-        best_match = None
-        best_score = 0.75  # threshold
+        from app.database import settings
 
-        for event in recent_events:
-            if event.embedding_centroid:
-                sim = self.embedding.cosine_similarity(centroid, event.embedding_centroid)
-                if sim > best_score:
-                    best_score = sim
-                    best_match = event
-
-        return best_match
+        if settings.DATABASE_URL.startswith("postgresql"):
+            similar = (
+                self.db.query(HotEvent)
+                .filter(HotEvent.last_updated_at >= cutoff)
+                .filter(HotEvent.embedding_centroid.isnot(None))
+                .order_by(HotEvent.embedding_centroid.cosine_distance(centroid))
+                .first()
+            )
+            if similar is None:
+                return None
+            sim = self.embedding.cosine_similarity(centroid, similar.embedding_centroid)
+            return similar if sim > 0.75 else None
+        else:
+            # SQLite fallback: brute-force search
+            recent_events = (
+                self.db.query(HotEvent)
+                .filter(HotEvent.last_updated_at >= cutoff)
+                .all()
+            )
+            best_match = None
+            best_score = 0.75
+            for event in recent_events:
+                if event.embedding_centroid:
+                    sim = self.embedding.cosine_similarity(centroid, event.embedding_centroid)
+                    if sim > best_score:
+                        best_score = sim
+                        best_match = event
+            return best_match
 
     def _create_event(
         self,

@@ -7,7 +7,7 @@ _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 _ENV_FILE_PATH = _PROJECT_ROOT / ".env"
 class Settings(BaseSettings):
     # Database
-    DATABASE_URL: str = ""  # Loaded from .env
+    DATABASE_URL: str = "postgresql+psycopg2://hotnews:hotnews@localhost:51132/hotnews"
     REDIS_URL: str = "redis://localhost:51179/0"
     # Tianapi
     TIANAPI_KEY: str = ""
@@ -41,6 +41,7 @@ class Settings(BaseSettings):
     # AI process interval (fixed, minutes)
     AI_PROCESS_INTERVAL_MINUTES: int = 15
     MAX_ARTICLES_PER_BATCH: int = 500
+    EMBEDDING_DIMENSION: int = 2048
     class Config:
         env_file = str(_ENV_FILE_PATH) if _ENV_FILE_PATH.exists() else ".env"
         env_file_encoding = "utf-8"

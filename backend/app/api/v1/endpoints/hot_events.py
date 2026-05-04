@@ -24,17 +24,14 @@ async def list_hot_events(
     now = datetime.now(timezone.utc)
     since = now - timedelta(days=7)
     today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
-    # SQLite stores naive UTC datetimes; strip tzinfo for comparison
-    since_naive = since.replace(tzinfo=None)
-    today_start_naive = today_start.replace(tzinfo=None)
 
-    query = db.query(HotEvent).filter(HotEvent.last_updated_at >= since_naive)
+    query = db.query(HotEvent).filter(HotEvent.last_updated_at >= since)
     if category:
         query = query.filter(HotEvent.category == category)
 
     # Today's events first, then by hot_score within each group
     events = query.order_by(
-        case((HotEvent.first_seen_at >= today_start_naive, 1), else_=0).desc(),
+        case((HotEvent.first_seen_at >= today_start, 1), else_=0).desc(),
         HotEvent.hot_score.desc(),
     ).limit(limit).all()
     return events

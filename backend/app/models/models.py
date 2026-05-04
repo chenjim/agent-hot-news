@@ -1,8 +1,13 @@
 from sqlalchemy import Column, Integer, String, Text, DateTime, Float, JSON, ForeignKey, Enum, Boolean
 from sqlalchemy.orm import relationship
 from app.database import Base
+from app.models.vector_type import VectorType
+from app.core.config import get_settings
 from datetime import datetime, timezone
 import enum
+
+_settings = get_settings()
+_EMBEDDING_DIM = _settings.EMBEDDING_DIMENSION
 
 
 class SourceType(str, enum.Enum):
@@ -31,7 +36,7 @@ class Article(Base):
     fetched_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     raw_hot_score = Column(Float, default=0.0)
     language = Column(String(10), default="zh")
-    embedding = Column(JSON)  # stored as list of floats
+    embedding = Column(VectorType(_EMBEDDING_DIM))  # pgvector on PG, JSON fallback on SQLite
     is_processed = Column(Boolean, default=False)
 
     event_articles = relationship("EventArticle", back_populates="article")
@@ -53,7 +58,7 @@ class HotEvent(Base):
     first_seen_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     last_updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
     cover_image = Column(String(2048))
-    embedding_centroid = Column(JSON)
+    embedding_centroid = Column(VectorType(_EMBEDDING_DIM))
 
     event_articles = relationship("EventArticle", back_populates="event")
 
