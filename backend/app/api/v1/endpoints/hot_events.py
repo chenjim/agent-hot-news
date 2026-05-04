@@ -1,0 +1,95 @@
+from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy.orm import Session
+from sqlalchemy import case
+from typing import List, Optional
+from datetime import datetime, timedelta, timezone
+
+from app.database import get_db
+from app.models.models import HotEvent, EventArticle, Article
+from app.schemas.hot_event import HotEventListItem, HotEventDetail
+from app.cache import cache_response
+
+router = APIRouter()
+
+
+@router.get("", response_model=List[HotEventListItem])
+@cache_response(ttl=60)
+async def list_hot_events(
+    category: Optional[str] = Query(None, description="Filter by category"),
+    limit: int = Query(30, ge=1, le=100),
+    db: Session = Depends(get_db),
+):
+    """Get hot events: today's events first, then recent 7d history.
+    Ordered by is_today desc, then hot_score desc within each group."""
+    now = datetime.now(timezone.utc)
+    since = now - timedelta(days=7)
+    today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    # SQLite stores naive UTC datetimes; strip tzinfo for comparison
+    since_naive = since.replace(tzinfo=None)
+    today_start_naive = today_start.replace(tzinfo=None)
+
+    query = db.query(HotEvent).filter(HotEvent.last_updated_at >= since_naive)
+    if category:
+        query = query.filter(HotEvent.category == category)
+
+    # Today's events first, then by hot_score within each group
+    events = query.order_by(
+        case((HotEvent.first_seen_at >= today_start_naive, 1), else_=0).desc(),
+        HotEvent.hot_score.desc(),
+    ).limit(limit).all()
+    return events
+
+
+@router.get("/{event_id}", response_model=HotEventDetail)
+async def get_hot_event_detail(
+    event_id: int,
+    db: Session = Depends(get_db),
+):
+    """Get detailed information about a specific hot event."""
+    event = db.query(HotEvent).filter(HotEvent.id == event_id).first()
+    if not event:
+        raise HTTPException(status_code=404, detail="Event not found")
+
+    # Load related articles through EventArticle
+    event_articles = (
+        db.query(EventArticle, Article)
+        .join(Article, EventArticle.article_id == Article.id)
+        .filter(EventArticle.event_id == event_id)
+        .order_by(Article.published_at.desc())
+        .all()
+    )
+
+    # Build timeline and sources
+    timeline = []
+    sources = []
+    for ea, article in event_articles:
+        timeline.append({
+            "time": article.published_at.isoformat() if article.published_at else None,
+            "source": article.source_name,
+            "title": article.title,
+        })
+        sources.append({
+            "name": article.source_name,
+            "url": article.url,
+            "title": article.title,
+            "hot_score": article.raw_hot_score,
+        })
+
+    return {
+        "id": event.id,
+        "title": event.title,
+        "summary": event.summary,
+        "category": event.category,
+        "hot_score": event.hot_score,
+        "trend": event.trend,
+        "sentiment": event.sentiment,
+        "entities": event.entities,
+        "articles_count": event.articles_count,
+        "sources_count": event.sources_count,
+        "first_seen_at": event.first_seen_at,
+        "last_updated_at": event.last_updated_at,
+        "cover_image": event.cover_image,
+        "timeline": timeline,
+        "sources": sources,
+        "related_events": [],  # TODO: implement related events
+    }

@@ -1,194 +1,140 @@
 # Agent Hot News
 
-AI 驱动的多源热点新闻实时检测与聚合展示系统。
+项目地址：<https://github.com/chenjim/agent-hot-news> | 预览：<https://f.h89.cn:51130/>
+
+> 每天早上打开新闻 App，满屏都是标题党？信息过载让人疲惫。这个项目想解决一个问题：**"今天到底发生了什么大事？"**
+
+## 背景
+
+作为一个关注科技行业的人，我每天要刷 Twitter/HN/微博/知乎/36氪……每个平台都有自己的热点，但它们散落各处，而且算法的"猜你喜欢"往往让真正重要的事件被淹没。
+
+我想做一个工具，能够：
+
+- **自动采集**多个平台的热门内容
+- **用 AI 聚合**相似报道，把"同一件事"的不同来源合并
+- **提炼要点**，用几分钟读完今天最重要的 10-20 件事
+- **实时推送**，新的大事件发生时不漏报
+
+这就是 Agent Hot News。
 
 ## 核心特性
 
-- **多源采集**：RSS、API、爬虫配置化接入，覆盖科技、财经、国际、社交媒体
-- **AI 热点识别**：Embedding 向量聚类 + LLM 总结提取，自动发现"今天这 5 件大事"
-- **热度计算**：原始热度 × 传播速度 × 来源多样性 - 时间衰减
-- **汇总展示**：前端展示 AI 聚合后的热点事件，非原始新闻列表
-- **管理后台**：可视化监控统计、来源 CRUD、手动触发采集与 AI 处理
-- **SSE 实时推送**：新热点事件和排名大幅变动时，前端自动收到实时通知
+### 多源聚合
 
-## 技术栈
+系统内置接入多个主流平台：
 
-| 层级 | 技术 |
-|------|------|
-| 后端 | Python 3.12 + FastAPI + SQLAlchemy + APScheduler |
-| 数据库 | PostgreSQL + Redis |
-| AI | OpenAI Embedding + GPT / 兼容本地 Ollama |
-| 前端 | React 18 + TypeScript + Tailwind CSS + SWR |
-| 部署 | Docker Compose |
+| 来源 | 类型 | 说明 |
+|------|------|------|
+| 36氪 | RSS | 科技创业媒体 |
+| Hacker News | API | 全球技术社区热帖 |
+| TechCrunch | RSS | 国际科技媒体 |
+| Solidot | RSS | 开源/科技资讯 |
+| GitHub Trending | 爬虫 | 当日趋势仓库 |
+| 知乎 | API | 全站热榜 |
+| 微博热搜 | 爬虫 | 实时热搜榜 |
+| 百度热搜 | 爬虫 | 百度实时热点 |
+| 天行 API | API | 抖音/网络/微博等热点 |
 
-## 快速启动
+更重要的是，它支持**配置化接入新来源**——只需要定义 endpoint 和解析规则，无需改动核心代码。
 
-### 1. 配置环境变量
+### AI 热点发现
 
-```bash
-cp .env.example .env
-# 编辑 .env，填入 OPENAI_API_KEY
-```
+传统的新闻聚合只是"搬运工"：把 100 条新闻按时间排列，用户还是要自己消化。
 
-### 2. Docker Compose 启动
+我们的做法：
 
-```bash
-docker-compose up --build
-```
+1. **Embedding**：每篇文章（标题 + 摘要）转为向量，默认使用 `nvidia/llama-nemotron-embed-vl-1b-v2:free`
+2. **向量聚类**：用 DBSCAN（cosine 距离, eps=0.25, min_samples=2）把相似内容归为一组
+3. **LLM 提炼**：对每个聚类调用 OpenRouter 上的 `deepseek/deepseek-v4-flash` 生成结构化 JSON（标题≤8字、摘要≤60字、分类、情感、关键实体）
+4. **热度评分**：`H = 0.3·avg_raw + 5.0·count + 10.0·sources - 0.5·hours_old`
+5. **去重+排序**：新事件与 48h 内事件 centroid 做 cosine similarity，超过 0.75 则合并；按热度分数降序取 Top N
 
-- 前端：`http://localhost:3000`
-- 后端 API：`http://localhost:8000`
-- API 文档：`http://localhost:8000/docs`
-- 管理后台：`http://localhost:3000/admin`
+结果展示的是"事件"而非"文章"，每个事件包含：标题、摘要、分类、情感、关键实体、来源列表。
 
-### 3. 本地开发（不依赖 Docker）
+### 实时推送
 
-**后端：**
-```bash
-cd backend
-python -m venv venv
-source venv/bin/activate  # Windows: venv\Scripts\activate
-pip install -r requirements.txt
-uvicorn app.main:app --reload
-```
-
-**前端：**
-```bash
-cd frontend
-npm install
-npm run dev
-```
-
-## 系统架构
-
-```
-┌─────────────┐     ┌─────────────┐     ┌─────────────────┐
-│  新闻源      │────▶│  采集器      │────▶│  Article (PG)   │
-│ RSS/API/爬虫 │     │ Collector   │     │ 原始文章表       │
-└─────────────┘     └─────────────┘     └─────────────────┘
-                                                │
-                                                ▼
-                                      ┌─────────────────┐
-                                      │  AI Pipeline    │
-                                      │ 1. Embedding    │
-                                      │ 2. DBSCAN 聚类   │
-                                      │ 3. LLM 总结     │
-                                      │ 4. 热度评分     │
-                                      └─────────────────┘
-                                                │
-                                                ▼
-                                      ┌─────────────────┐
-                                      │  HotEvent (PG)  │
-                                      │ 聚合热点事件表   │
-                                      └─────────────────┘
-                                                │
-                    ┌───────────────────────────┘
-                    ▼
-          ┌─────────────────┐
-          │  FastAPI        │
-          │  /api/v1/hot-events
-          │  /api/v1/admin/*
-          │  /api/v1/sse/*
-          └─────────────────┘
-                    │
-                    ▼
-          ┌─────────────────┐
-          │  React +        │
-          │  Tailwind       │
-          │  热点大盘        │
-          │  管理后台        │
-          └─────────────────┘
-```
-
-## 项目结构
-
-```
-agent-hot-news/
-├── backend/
-│   ├── app/
-│   │   ├── api/v1/endpoints/   # REST API
-│   │   ├── collectors/         # 多源采集器
-│   │   ├── ai_pipeline/        # Embedding + 聚类 + LLM
-│   │   ├── models/             # SQLAlchemy 数据模型
-│   │   ├── scheduler/          # 定时任务
-│   │   ├── core/               # 配置
-│   │   ├── cache/              # Redis 缓存装饰器
-│   │   ├── database.py         # 数据库连接
-│   │   ├── main.py             # FastAPI 入口
-│   │   └── seed.py             # 默认来源种子
-│   ├── requirements.txt
-│   └── Dockerfile
-├── frontend/
-│   ├── src/
-│   │   ├── components/         # UI 组件
-│   │   ├── pages/              # 页面
-│   │   ├── hooks/              # API hooks (SWR)
-│   │   ├── types/              # TypeScript 类型
-│   │   └── lib/                # 工具函数
-│   ├── package.json
-│   └── Dockerfile
-├── docker-compose.yml
-├── .env.example
-└── docs/
-    ├── requirement.md          # 需求文档
-    └── CODE_REVIEW.md          # 代码审查报告
-```
-
-## 内置新闻源
-
-系统启动时会自动种子化以下来源：
-
-| 来源 | 类型 | 语言 | 说明 |
-|------|------|------|------|
-| 36氪 | RSS | 中文 | 科技创业媒体 |
-| Hacker News | API | 英文 | 全球技术社区热帖 |
-| TechCrunch | RSS | 英文 | 国际科技媒体 |
-| Solidot | RSS | 中文 | 开源/科技资讯 |
-| GitHub Trending | 爬虫 | 英文 | GitHub 当日趋势仓库 |
-| 掘金 | API | 中文 | 技术社区推荐文章 |
-| 知乎 | API | 中文 | 知乎全站热榜 |
-| 微博热搜 | 爬虫 | 中文 | 微博实时热搜榜 |
-
-## API 概览
-
-### 热点事件
-- `GET /api/v1/hot-events?category=&limit=20&timeframe=24h` — 热点事件列表
-- `GET /api/v1/hot-events/{id}` — 热点事件详情（含时间线与来源报道）
-
-### 来源管理
-- `GET /api/v1/sources` — 列出所有来源
-- `POST /api/v1/sources` — 新增来源
-- `PUT /api/v1/sources/{id}` — 更新来源
-- `DELETE /api/v1/sources/{id}` — 删除来源
-- `POST /api/v1/sources/{id}/fetch` — 手动触发单个来源采集
-
-### 文章
-- `GET /api/v1/articles?source_name=&is_processed=&limit=50&offset=0` — 原始文章列表
+通过 SSE (Server-Sent Events)，前端可以在新热点出现或排名大幅变动时实时收到通知，适合作为"新闻监控大盘"挂在显示器上。
 
 ### 管理后台
-- `GET /api/v1/admin/stats` — 系统统计仪表盘
-- `GET /api/v1/admin/logs?limit=100` — 最近任务执行日志
-- `POST /api/v1/admin/trigger-fetch` — 手动触发全量采集
-- `POST /api/v1/admin/trigger-ai` — 手动触发 AI 处理
 
-### SSE 实时推送
-- `GET /api/v1/sse/hot-events` — Server-Sent Events，推送新事件与排名变动
+- 可视化监控采集状态、AI 处理进度、来源健康度
+- 支持增删改来源、调整采集频率
+- 手动触发采集/AI 处理
+- 查看执行日志
 
-## 添加新的新闻源
+## 快速开始
 
-通过 API 或直接在数据库中添加：
+### 环境要求
+
+- Python 3.12+
+- Node.js 18+
+- Docker (用于 Redis 和前端)
+- OpenAI API Key 或 OpenRouter API Key（支持 DeepSeek、OpenAI 等多模型）
+
+### 1. 克隆并配置
 
 ```bash
-curl -X POST http://localhost:8000/api/v1/sources \
-  -H "Content-Type: application/json" \
-  -d '{
-    "name": "某科技博客",
-    "type": "rss",
-    "endpoint": "https://example.com/feed",
-    "interval": 600
-  }'
+git clone <repo-url>
+cd agent-hot-news
+
+# 创建环境变量文件
+cp .env.example .env  # 如无 .env.example，手动创建 .env
+# 编辑 .env，填入你的 OPENAI_API_KEY 等配置
 ```
 
-## License
+### 2. 启动所有服务
 
-MIT
+```bash
+./start.sh
+```
+
+这会启动：
+- **Redis** (localhost:51179) — API 缓存
+- **前端** (localhost:51130) — React 应用
+- **后端** (localhost:51180) — FastAPI，自动创建 venv 并通过 systemd 管理
+
+访问 http://localhost:51130 即可看到热点大盘。
+
+## 技术架构
+
+```
+┌──────────────────────────────────────────────────────┐
+│                      新闻源                           │
+│   RSS / API / 爬虫 (36氪, HN, 知乎, 微博...)         │
+└──────────────────────┬───────────────────────────────┘
+                       ▼
+┌──────────────────────────────────────────────────────┐
+│                   采集器层                            │
+│   配置化 Collector: 统一接口，自动重试，速率限制        │
+└──────────────────────┬───────────────────────────────┘
+                       ▼
+┌──────────────────────────────────────────────────────┐
+│                  原始文章库                           │
+│              SQLite (dev) / PostgreSQL                │
+└──────────────────────┬───────────────────────────────┘
+                       ▼
+┌──────────────────────────────────────────────────────┐
+│                   AI Pipeline                        │
+│   1. Embedding (NVIDIA via OpenRouter)              │
+│   2. DBSCAN 聚类 (相似内容归组)                       │
+│   3. DeepSeek LLM 总结 (OpenRouter, 提炼要点)       │
+│   4. 热度评分 (多维度加权)                            │
+└──────────────────────┬───────────────────────────────┘
+                       ▼
+┌──────────────────────────────────────────────────────┐
+│                  热点事件库                           │
+│              聚合后的热点事件 + 时间线                  │
+└──────────────────────┬───────────────────────────────┘
+                       ▼
+┌──────────────────────────────────────────────────────┐
+│                  FastAPI + SSE                       │
+│           /hot-events  /admin  /sse                  │
+└──────────────────────┬───────────────────────────────┘
+                       ▼
+┌──────────────────────────────────────────────────────┐
+│                    React + SWR                       │
+│              热点大盘 / 事件详情 / 管理后台             │
+└──────────────────────────────────────────────────────┘
+---
+
+如果你也在为信息过载困扰，欢迎试用和反馈。
