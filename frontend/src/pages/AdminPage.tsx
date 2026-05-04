@@ -7,8 +7,6 @@ import {
   useSources,
   useTaskLogs,
   createSource,
-  updateSource,
-  deleteSource,
   triggerFetch,
   triggerAI,
   triggerSourceFetch,
@@ -21,16 +19,6 @@ export default function AdminPage() {
 
   const handleCreate = async (data: Parameters<typeof createSource>[0]) => {
     await createSource(data);
-    await mutateSources();
-  };
-
-  const handleUpdate = async (id: number, data: Parameters<typeof updateSource>[1]) => {
-    await updateSource(id, data);
-    await mutateSources();
-  };
-
-  const handleDelete = async (id: number) => {
-    await deleteSource(id);
     await mutateSources();
   };
 
@@ -58,8 +46,6 @@ export default function AdminPage() {
           sources={sources}
           isLoading={sourcesLoading}
           onCreate={handleCreate}
-          onUpdate={handleUpdate}
-          onDelete={handleDelete}
           onTriggerFetch={handleTriggerSourceFetch}
         />
 

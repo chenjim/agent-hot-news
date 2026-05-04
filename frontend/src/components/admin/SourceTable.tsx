@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Plus, Pencil, Trash2, Play, AlertCircle, CheckCircle2, PauseCircle } from 'lucide-react';
+import { Plus, Play, AlertCircle, CheckCircle2, PauseCircle } from 'lucide-react';
 import type { Source, SourceFormData } from '@/types';
 import { cn, formatRelativeTime } from '@/lib/utils';
 import SourceFormModal from './SourceFormModal';
@@ -8,8 +8,6 @@ interface SourceTableProps {
   sources: Source[];
   isLoading: boolean;
   onCreate: (data: SourceFormData) => Promise<void>;
-  onUpdate: (id: number, data: SourceFormData) => Promise<void>;
-  onDelete: (id: number) => Promise<void>;
   onTriggerFetch: (id: number) => Promise<void>;
 }
 
@@ -34,40 +32,17 @@ export default function SourceTable({
   sources,
   isLoading,
   onCreate,
-  onUpdate,
-  onDelete,
   onTriggerFetch,
 }: SourceTableProps) {
   const [modalOpen, setModalOpen] = useState(false);
-  const [editing, setEditing] = useState<Source | null>(null);
   const [actionLoading, setActionLoading] = useState<number | null>(null);
 
-  const handleEdit = (source: Source) => {
-    setEditing(source);
-    setModalOpen(true);
-  };
-
   const handleCreate = () => {
-    setEditing(null);
     setModalOpen(true);
   };
 
   const handleSubmit = async (data: SourceFormData) => {
-    if (editing) {
-      await onUpdate(editing.id, data);
-    } else {
-      await onCreate(data);
-    }
-  };
-
-  const handleDelete = async (id: number) => {
-    if (!confirm('确定删除该来源吗？')) return;
-    setActionLoading(id);
-    try {
-      await onDelete(id);
-    } finally {
-      setActionLoading(null);
-    }
+    await onCreate(data);
   };
 
   const handleTrigger = async (id: number) => {
@@ -141,21 +116,6 @@ export default function SourceTable({
                         >
                           <Play className="h-4 w-4" />
                         </button>
-                        <button
-                          onClick={() => handleEdit(source)}
-                          title="编辑"
-                          className="rounded p-1.5 text-muted-foreground hover:bg-secondary hover:text-foreground"
-                        >
-                          <Pencil className="h-4 w-4" />
-                        </button>
-                        <button
-                          onClick={() => handleDelete(source.id)}
-                          disabled={actionLoading === source.id}
-                          title="删除"
-                          className="rounded p-1.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive disabled:opacity-50"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </button>
                       </div>
                     </td>
                   </tr>
@@ -170,7 +130,6 @@ export default function SourceTable({
         isOpen={modalOpen}
         onClose={() => setModalOpen(false)}
         onSubmit={handleSubmit}
-        initialData={editing}
       />
     </div>
   );
