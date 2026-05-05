@@ -5,6 +5,11 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
+/** 获取浏览器本地时区 IANA 名，如 "Asia/Shanghai" */
+export function getBrowserTimezone(): string {
+  return Intl.DateTimeFormat().resolvedOptions().timeZone;
+}
+
 export function formatRelativeTime(dateStr: string | null): string {
   if (!dateStr) return '未知时间';
   // Backend returns naive UTC datetimes without timezone marker.
@@ -78,8 +83,8 @@ export function isToday(dateStr: string | null): boolean {
   const date = new Date(utcStr);
   const now = new Date();
   return (
-    date.getUTCFullYear() === now.getUTCFullYear() &&
-    date.getUTCMonth() === now.getUTCMonth() &&
-    date.getUTCDate() === now.getUTCDate()
+    date.getFullYear() === now.getFullYear() &&
+    date.getMonth() === now.getMonth() &&
+    date.getDate() === now.getDate()
   );
 }

@@ -28,8 +28,8 @@ class Settings(BaseSettings):
 
     OPENAI_EMBEDDING_API_KEY: str = ""  # empty = fallback to OPENAI_API_KEY
     OPENAI_EMBEDDING_BASE_URL: str = ""  # empty = fallback to OPENAI_BASE_URL
-    OPENAI_EMBEDDING_MODEL: str = "nvidia/llama-nemotron-embed-vl-1b-v2:free"
-
+    OPENAI_EMBEDDING_MODEL: str = "qwen/qwen3-embedding-8b"
+    
     # Local LLM fallback
     LOCAL_LLM_URL: str = "http://localhost:11434/api/generate"
     LOCAL_LLM_MODEL: str = "qwen2.5:14b"
@@ -45,7 +45,7 @@ class Settings(BaseSettings):
     # AI process interval (fixed, minutes)
     AI_PROCESS_INTERVAL_MINUTES: int = 15
     MAX_ARTICLES_PER_BATCH: int = 500
-    EMBEDDING_DIMENSION: int = 2048
+    EMBEDDING_DIMENSION: int = 4096
     class Config:
         env_file = str(_ENV_FILE_PATH) if _ENV_FILE_PATH.exists() else ".env"
         env_file_encoding = "utf-8"

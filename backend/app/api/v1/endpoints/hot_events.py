@@ -2,12 +2,13 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import case
 from typing import List, Optional
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 
 from app.database import get_db
 from app.models.models import HotEvent, EventArticle, Article
 from app.schemas.hot_event import HotEventListItem, HotEventDetail
 from app.cache import cache_response
+from app.utils.timezone import get_tz
 
 router = APIRouter()
 
@@ -18,10 +19,11 @@ async def list_hot_events(
     category: Optional[str] = Query(None, description="Filter by category"),
     limit: int = Query(30, ge=1, le=100),
     db: Session = Depends(get_db),
+    tz: str = Query("Asia/Shanghai"),
 ):
     """Get hot events: today's events first, then recent 7d history.
     Ordered by is_today desc, then hot_score desc within each group."""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(get_tz(tz))
     since = now - timedelta(days=7)
     today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
 

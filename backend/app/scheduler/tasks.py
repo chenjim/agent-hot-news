@@ -204,9 +204,51 @@ def ai_process_task():
         logger.exception("Failed to reschedule AI process task")
 
 
+def cleanup_task():
+    """Scheduled task: delete articles and events older than 10 days."""
+    cutoff = datetime.now() - timedelta(days=10)
+
+    async def _run():
+        db = SessionLocal()
+        try:
+            # Delete old events first (cascade deletes event_articles)
+            old_events = (
+                db.query(HotEvent)
+                .filter(HotEvent.last_updated_at < cutoff)
+                .delete(synchronize_session=False)
+            )
+
+            # Delete old articles (cascade deletes remaining event_articles)
+            old_articles = (
+                db.query(Article)
+                .filter(Article.fetched_at < cutoff)
+                .delete(synchronize_session=False)
+            )
+
+            db.commit()
+            logger.info(f"Cleanup complete: {old_events} events, {old_articles} articles deleted")
+        except Exception as e:
+            logger.error(f"Cleanup task error: {e}")
+            db.rollback()
+        finally:
+            db.close()
+
+    asyncio.run(_run())
+
+
 def start_scheduler():
     """Start background scheduled tasks."""
     scheduler.start()
+
+    # Daily cleanup at 00:00
+    scheduler.add_job(
+        cleanup_task,
+        trigger="cron",
+        hour=0,
+        minute=0,
+        id="cleanup",
+        replace_existing=True,
+    )
 
     # Use date trigger so each task can dynamically reschedule itself after completion
     scheduler.add_job(
@@ -223,7 +265,7 @@ def start_scheduler():
         id="ai_process",
         replace_existing=True,
     )
-    logger.info("Scheduler started: adaptive random intervals (day 30-60min, night 60-120min)")
+    logger.info("Scheduler started: daily cleanup at 00:00, adaptive fetch intervals")
 
 
 def stop_scheduler():

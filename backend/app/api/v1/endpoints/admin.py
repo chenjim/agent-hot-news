@@ -3,7 +3,7 @@ from collections import deque
 from datetime import datetime, timedelta, timezone
 from typing import List
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 from loguru import logger
@@ -11,6 +11,7 @@ from loguru import logger
 from app.database import get_db
 from app.models.models import Article, HotEvent, Source, SourceStatus
 from app.scheduler.tasks import fetch_task, ai_process_task
+from app.utils.timezone import get_tz
 
 router = APIRouter()
 
@@ -32,9 +33,9 @@ def _append_log(task_name: str, status: str, message: str = ""):
 
 
 @router.get("/stats")
-def get_admin_stats(db: Session = Depends(get_db)):
+def get_admin_stats(db: Session = Depends(get_db), tz: str = Query("Asia/Shanghai")):
     """System statistics dashboard."""
-    today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+    today_start = datetime.now(get_tz(tz)).replace(hour=0, minute=0, second=0, microsecond=0)
 
     articles_today = (
         db.query(func.count(Article.id))

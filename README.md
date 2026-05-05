@@ -43,7 +43,7 @@
 
 我们的做法：
 
-1. **Embedding**：每篇文章（标题 + 摘要）转为向量，默认使用 `nvidia/llama-nemotron-embed-vl-1b-v2:free`
+1. **Embedding**：每篇文章（标题 + 摘要）转为向量，默认使用 `qwen/qwen3-embedding-8b`
 2. **向量聚类**：用 DBSCAN（cosine 距离, eps=0.25, min_samples=2）把相似内容归为一组
 3. **LLM 提炼**：对每个聚类调用 OpenRouter 上的 `deepseek/deepseek-v4-flash` 生成结构化 JSON（标题≤8字、摘要≤60字、分类、情感、关键实体）
 4. **热度评分**：`H = 0.3·avg_raw + 5.0·count + 10.0·sources - 0.5·hours_old`
@@ -53,14 +53,13 @@
 
 #### Embedding 模型选择
 
-默认使用 NVIDIA `llama-nemotron-embed-vl-1b-v2:free`（2048 维），可通过 `.env` 切换：
+默认使用 Qwen `qwen3-embedding-8b`（4096 维），可通过 `.env` 切换：
 
 | 模型 | 维度 | 特点 |
 |------|------|------|
-| `nvidia/llama-nemotron-embed-vl-1b-v2:free` | 2048 | 当前默认，多语言，免费 |
+| `qwen/qwen3-embedding-8b` | 4096 | 当前默认，中文效果最佳 |
+| `nvidia/llama-nemotron-embed-vl-1b-v2:free` | 2048 | NVIDIA 多语言，免费 |
 | `text-embedding-3-small` | 1536 | OpenAI 出品 |
-| `bge-m3` | 1024 | 中文优化好，BAAI 出品 |
-| `qwen3-embedding` | 4096 | 阿里出品，MTEB 多语言榜 #1 |
 
 更换模型后需同步更新 `.env` 中的 `EMBEDDING_DIMENSION` 并重建数据库迁移。
 
@@ -129,7 +128,7 @@ cp .env.example .env  # 如无 .env.example，手动创建 .env
                        ▼
 ┌──────────────────────────────────────────────────────┐
 │                   AI Pipeline                        │
-│   1. Embedding (NVIDIA via OpenRouter, 2048 维)     │
+│   1. Embedding (Qwen via OpenRouter, 4096 维)      │
 │   2. DBSCAN 聚类 (cosine 距离, 相似归组)             │
 │   3. DeepSeek LLM 总结 (OpenRouter, 提炼要点)       │
 │   4. 热度评分 (多维度加权)                            │

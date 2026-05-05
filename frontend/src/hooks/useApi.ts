@@ -1,5 +1,6 @@
 import useSWR, { mutate as globalMutate } from 'swr';
 import type { HotEvent, HotEventDetail, Category, Source, AdminStats, TaskLog, SourceFormData } from '@/types';
+import { getBrowserTimezone } from '@/lib/utils';
 
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:51180/api/v1';
 
@@ -47,6 +48,7 @@ export function useHotEvents(category: Category = 'all', limit: number = 30) {
   const params = new URLSearchParams();
   if (category !== 'all') params.set('category', category);
   params.set('limit', String(limit));
+  params.set('tz', getBrowserTimezone());
 
   const { data, error, isLoading, mutate } = useSWR<HotEvent[]>(
     `${API_BASE}/hot-events?${params.toString()}`,
@@ -68,8 +70,11 @@ export function useHotEventDetail(id: number | null) {
 
 // Admin hooks
 export function useAdminStats() {
+  const params = new URLSearchParams();
+  params.set('tz', getBrowserTimezone());
+
   const { data, error, isLoading, mutate } = useSWR<AdminStats>(
-    `${API_BASE}/admin/stats`,
+    `${API_BASE}/admin/stats?${params.toString()}`,
     fetcher,
     { refreshInterval: 30000, refreshWhenHidden: false }
   );
