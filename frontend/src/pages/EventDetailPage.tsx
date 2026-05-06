@@ -1,13 +1,14 @@
 import { useParams, Link } from 'react-router-dom';
-import { ArrowLeft, TrendingUp, TrendingDown, Minus, Clock, Globe, Newspaper } from 'lucide-react';
+import { ArrowLeft, TrendingUp, TrendingDown, Flame, Clock, Globe, Newspaper } from 'lucide-react';
 import Header from '@/components/Header';
 import { useHotEventDetail } from '@/hooks/useApi';
 import { cn, formatRelativeTime, getSentimentColor, getSentimentLabel } from '@/lib/utils';
 
-function TrendIcon({ trend }: { trend: string }) {
-  if (trend === 'up') return <TrendingUp className="h-5 w-5" />;
-  if (trend === 'down') return <TrendingDown className="h-5 w-5" />;
-  return <Minus className="h-5 w-5" />;
+function TrendIcon({ trend, className }: { trend: string; className?: string }) {
+  const sizeClass = 'h-5 w-5';
+  if (trend === 'up') return <TrendingUp className={cn(sizeClass, className)} />;
+  if (trend === 'down') return <TrendingDown className={cn(sizeClass, className)} />;
+  return <Flame className={cn(sizeClass, className)} />;
 }
 
 export default function EventDetailPage() {
@@ -68,7 +69,7 @@ export default function EventDetailPage() {
               )}
             </div>
             <div className="flex items-center gap-2 rounded-full bg-primary/10 px-4 py-2 text-primary">
-              <TrendIcon trend={event.trend} />
+              <TrendIcon trend={event.trend} className="text-orange-500" />
               <span className="text-xl font-bold">{event.hot_score.toFixed(1)}</span>
             </div>
           </div>

@@ -1,6 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
-from sqlalchemy import case
 from typing import List, Optional
 from datetime import datetime, timedelta
 
@@ -21,7 +20,7 @@ async def list_hot_events(
     db: Session = Depends(get_db),
     tz: str = Query("Asia/Shanghai"),
 ):
-    """Get hot events: today's events first, then recent 7d history.
+    """Get hot events ordered by first_seen_at desc (newest first).
     Ordered by is_today desc, then hot_score desc within each group."""
     now = datetime.now(get_tz(tz))
     since = now - timedelta(days=7)
@@ -31,10 +30,9 @@ async def list_hot_events(
     if category:
         query = query.filter(HotEvent.category == category)
 
-    # Today's events first, then by hot_score within each group
+    # Order by first_seen_at desc (newest first)
     events = query.order_by(
-        case((HotEvent.first_seen_at >= today_start, 1), else_=0).desc(),
-        HotEvent.hot_score.desc(),
+        HotEvent.first_seen_at.desc(),
     ).limit(limit).all()
     return events
 

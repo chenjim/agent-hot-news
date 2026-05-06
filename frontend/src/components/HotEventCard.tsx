@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom';
-import { TrendingUp, TrendingDown, Minus, Newspaper, Globe } from 'lucide-react';
+import { TrendingUp, TrendingDown, Flame, Newspaper, Globe } from 'lucide-react';
 import type { HotEvent } from '@/types';
 import {
   cn,
@@ -15,10 +15,11 @@ interface HotEventCardProps {
   index: number;
 }
 
-function TrendIcon({ trend }: { trend: string }) {
-  if (trend === 'up') return <TrendingUp className="h-4 w-4" />;
-  if (trend === 'down') return <TrendingDown className="h-4 w-4" />;
-  return <Minus className="h-4 w-4" />;
+function TrendIcon({ trend, className }: { trend: string; className?: string }) {
+  const sizeClass = 'h-4 w-4';
+  if (trend === 'up') return <TrendingUp className={cn(sizeClass, className)} />;
+  if (trend === 'down') return <TrendingDown className={cn(sizeClass, className)} />;
+  return <Flame className={cn(sizeClass, className)} />;
 }
 
 export default function HotEventCard({ event, index }: HotEventCardProps) {
@@ -65,7 +66,7 @@ export default function HotEventCard({ event, index }: HotEventCardProps) {
         <div className="flex flex-wrap items-center gap-3 text-xs">
           {/* Hot score */}
           <div className="flex items-center gap-1 rounded-full bg-primary/10 px-2.5 py-1 font-semibold text-primary">
-            <TrendIcon trend={event.trend} />
+            <TrendIcon trend={event.trend} className="text-orange-500" />
             <span>{event.hot_score.toFixed(1)}</span>
           </div>
 
