@@ -10,6 +10,8 @@ from app.collectors.weibo_hot_collector import WeiboHotCollector
 from app.collectors.tianapi_collector import TianapiCollector
 from app.collectors.hackernews_collector import HackerNewsCollector
 from app.collectors.baidu_hot_collector import BaiduHotCollector
+from app.collectors.google_news_collector import GoogleNewsCollector
+from app.collectors.toutiao_hot_collector import ToutiaoHotCollector
 from app.models.models import Source, SourceType, SourceStatus
 from sqlalchemy.orm import Session
 
@@ -28,12 +30,14 @@ NAME_COLLECTOR_MAP: Dict[str, Type[BaseCollector]] = {
     "juejin": JuejinCollector,
     "zhihu": ZhihuCollector,
     "weibo": WeiboHotCollector,
+    "toutiao": ToutiaoHotCollector,
     "tianapi_douyinhot": TianapiCollector,
     "tianapi_internet": TianapiCollector,
     "tianapi_networkhot": TianapiCollector,
     "tianapi_weibohot": TianapiCollector,
     "Hacker News": HackerNewsCollector,
     "baidu_hot": BaiduHotCollector,
+    "google_news": GoogleNewsCollector,
 }
 
 

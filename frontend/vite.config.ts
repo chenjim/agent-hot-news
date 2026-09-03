@@ -15,7 +15,7 @@ export default defineConfig({
     allowedHosts: ['.h89.cn', '192.168.31.165'],
     proxy: {
       '/api': {
-        target: 'http://192.168.31.165:51180',
+        target: process.env.BACKEND_URL || 'http://backend:8000',
         changeOrigin: true,
       },
     },

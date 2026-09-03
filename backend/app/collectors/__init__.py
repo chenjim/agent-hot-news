@@ -5,6 +5,7 @@ from .github_trending_collector import GitHubTrendingCollector
 from .juejin_collector import JuejinCollector
 from .zhihu_collector import ZhihuCollector
 from .weibo_hot_collector import WeiboHotCollector
+from .google_news_collector import GoogleNewsCollector
 from .manager import CollectorManager
 
 __all__ = [
@@ -16,5 +17,6 @@ __all__ = [
     "JuejinCollector",
     "ZhihuCollector",
     "WeiboHotCollector",
+    "GoogleNewsCollector",
     "CollectorManager",
 ]

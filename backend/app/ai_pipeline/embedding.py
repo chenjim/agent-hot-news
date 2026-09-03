@@ -2,7 +2,7 @@ import asyncio
 from typing import List, Optional
 import numpy as np
 import httpx
-from app.core.config import get_settings
+from app.core.config import get_settings, llm_extra_headers
 from loguru import logger
 
 settings = get_settings()
@@ -35,6 +35,7 @@ class EmbeddingService:
             "Content-Type": "application/json",
             "HTTP-Referer": "https://localhost",
             "X-Title": "Agent Hot News",
+            **llm_extra_headers(self.base_url),
         }
 
         async with httpx.AsyncClient(timeout=60.0) as client:

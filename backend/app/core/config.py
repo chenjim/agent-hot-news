@@ -1,4 +1,5 @@
 import os
+import uuid
 from pathlib import Path
 from pydantic_settings import BaseSettings
 from functools import lru_cache
@@ -36,6 +37,8 @@ class Settings(BaseSettings):
     # App
     DEBUG: bool = False
     LOG_LEVEL: str = "INFO"
+    # CORS：逗号分隔，空则用内置默认；如 CORS_ORIGINS=https://f.h89.cn:51130
+    CORS_ORIGINS: str = ""
     # Fetch intervals (random range, minutes)
     FETCH_INTERVAL_DAY_MIN: int = 30
     FETCH_INTERVAL_DAY_MAX: int = 60
@@ -55,3 +58,17 @@ def get_settings() -> Settings:
     s = Settings()
     # Debug print to verify config loading
     return s
+
+
+# OpenCode Go 要求：base_url 含 opencode.ai 时携带 x-opencode-session（进程内稳定，用于服务端优化）
+OPENCODE_SESSION_ID = os.environ.get("OPENCODE_SESSION_ID") or f"agent-hot-news-{uuid.uuid4()}"
+
+
+def is_opencode_endpoint(base_url: str) -> bool:
+    return "opencode.ai" in base_url
+
+
+def llm_extra_headers(base_url: str) -> dict:
+    if not is_opencode_endpoint(base_url):
+        return {}
+    return {"x-opencode-session": OPENCODE_SESSION_ID}

@@ -29,6 +29,51 @@ services:
       timeout: 3s
       retries: 5
 
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      args:
+        # 构建期代理：局域网默认走 7890，外网/CI 可 export HTTP_PROXY="" 覆盖
+        HTTP_PROXY: ${HTTP_PROXY-http://192.168.31.165:7890}
+        HTTPS_PROXY: ${HTTPS_PROXY-http://192.168.31.165:7890}
+        PIP_INDEX_URL: ${PIP_INDEX_URL-https://pypi.tuna.tsinghua.edu.cn/simple}
+    container_name: hotnews-backend
+    restart: always
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "51180:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      # 容器内通过服务名访问，覆盖 .env 中的 localhost
+      DATABASE_URL: postgresql+psycopg2://hotnews:hotnews@postgres:5432/hotnews
+      REDIS_URL: redis://redis:6379/0
+      # 运行时代理：采集器 + LLM 出站走代理；内部服务名直连不走代理
+      HTTP_PROXY: ${HTTP_PROXY-http://192.168.31.165:7890}
+      HTTPS_PROXY: ${HTTPS_PROXY-http://192.168.31.165:7890}
+      http_proxy: ${HTTP_PROXY-http://192.168.31.165:7890}
+      https_proxy: ${HTTPS_PROXY-http://192.168.31.165:7890}
+      NO_PROXY: localhost,127.0.0.1,postgres,redis,backend
+      no_proxy: localhost,127.0.0.1,postgres,redis,backend
+    env_file:
+      - .env
+    volumes:
+      - ./backend:/app
+      # 遮蔽宿主机大目录，避免覆盖/拖慢容器（venv 约数 GB，会拖死 --reload 监听）
+      - /app/venv
+      - /app/__pycache__
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 8
+      start_period: 30s
+
   frontend:
     build:
       context: ./frontend
@@ -41,6 +86,10 @@ services:
       - /app/node_modules
     environment:
       - VITE_API_URL=/api/v1
+      - BACKEND_URL=http://backend:8000
+    depends_on:
+      backend:
+        condition: service_healthy
 
 volumes:
   redis_data:
