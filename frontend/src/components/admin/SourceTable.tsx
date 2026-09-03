@@ -103,8 +103,15 @@ export default function SourceTable({
                     <td className="px-4 py-3">
                       <StatusBadge status={source.status} />
                     </td>
-                    <td className="px-4 py-3 text-muted-foreground">
-                      {formatRelativeTime(source.last_fetched_at)}
+                    <td className="px-4 py-3">
+                      <span className="text-muted-foreground">
+                        {formatRelativeTime(source.last_fetched_at)}
+                      </span>
+                      {source.fetched_today != null && source.fetched_today > 0 && (
+                        <span className="ml-2 rounded-full bg-primary/10 px-2 py-0.5 text-xs text-primary">
+                          +{source.fetched_today}
+                        </span>
+                      )}
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex items-center justify-end gap-1">

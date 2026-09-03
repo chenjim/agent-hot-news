@@ -12,7 +12,6 @@ redis==5.2.0
 
 # AI / ML
 openai==1.54.0
-sentence-transformers==3.3.0
 scikit-learn==1.5.2
 numpy==2.1.3
 

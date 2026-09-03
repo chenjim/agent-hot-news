@@ -55,4 +55,5 @@ app.include_router(api_router, prefix="/api/v1")
 
 @app.get("/health")
 def health_check():
-    return {"status": "ok"}
+    from datetime import datetime, timezone
+    return {"status": "ok", "time": datetime.now(timezone.utc).isoformat()}

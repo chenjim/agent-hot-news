@@ -94,26 +94,7 @@ async def trigger_source_fetch(
         collector = manager.create_collector(source)
         articles = await collector.fetch()
 
-        seen_urls = set()
-        existing_urls = {url for url, in db.query(Article.url).all()}
-        new_count = 0
-        for raw in articles:
-            if raw.url in seen_urls or raw.url in existing_urls:
-                continue
-            seen_urls.add(raw.url)
-            article = Article(
-                url=raw.url,
-                title=raw.title,
-                summary=raw.summary,
-                content=raw.content,
-                source_name=raw.source_name,
-                source_url=raw.source_url,
-                published_at=raw.published_at,
-                raw_hot_score=raw.raw_hot_score,
-                language=raw.language,
-            )
-            db.add(article)
-            new_count += 1
+        new_count = manager.save_articles(articles)
 
         # Update source timestamp
         source.last_fetched_at = datetime.now(timezone.utc)

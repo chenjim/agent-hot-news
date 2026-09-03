@@ -51,6 +51,7 @@ class SummarizerService:
 {{
   "title": "...",
   "summary": "...",
+  "detail": "...",
   "category": "...",
   "sentiment": "...",
   "entities": ["...", "..."]
@@ -59,9 +60,15 @@ class SummarizerService:
 要求：
 1. title: 用不超过 8 个字概括事件核心
 2. summary: 用一句话（不超过 60 字）描述事件
-3. category: 必须从 [tech, finance, social, global, other] 中选择最符合的
-4. sentiment: 必须从 [positive, negative, neutral] 中选择整体情感倾向
-5. entities: 列出事件涉及的关键实体（人物、公司、地点、产品名），最多 5 个
+3. detail: 用 150-300 字详细介绍事件的背景、关键信息、进展和意义，要信息密度高、有深度
+4. category: 必须从 [tech, finance, social, global, other] 中选择最符合的
+5. sentiment: 必须从 [positive, negative, neutral] 中选择整体情感倾向
+6. entities: 列出事件涉及的关键实体（人物、公司、地点、产品名、事件名、技术名），要简洁，最多 5 个
+
+重要约束：
+- 严格基于提供的报道内容进行总结，不得编造任何源材料中未提及的信息
+- 禁止编造或猜测具体年份、日期、数字等细节，除非源材料明确提到
+- 若来源未给出具体时间，使用"近日""近期"等模糊表述，不要自行补充年份
 """
 
         payload = {
@@ -73,6 +80,7 @@ class SummarizerService:
             "temperature": 0.3,
             "max_tokens": 400,
             "response_format": {"type": "json_object"},
+            "reasoning_effort": "none",  # 关闭 deepseek-v4-flash 思维链，避免挤占 content
         }
         headers = {
             "Authorization": f"Bearer {self.api_key}",
@@ -120,7 +128,7 @@ class SummarizerService:
 
                 result = json.loads(raw)
 
-                required_fields = {"title", "summary", "category", "sentiment", "entities"}
+                required_fields = {"title", "summary", "detail", "category", "sentiment", "entities"}
                 if not required_fields.issubset(result.keys()):
                     missing = required_fields - result.keys()
                     raise RuntimeError(f"Missing required fields: {missing}")
@@ -139,6 +147,7 @@ class SummarizerService:
         return {
             "title": titles[0][:20] if titles else "未知事件",
             "summary": summaries[0][:60] if summaries else "暂无摘要",
+            "detail": summaries[0][:300] if summaries else "暂无详情",
             "category": "other",
             "sentiment": "neutral",
             "entities": [],

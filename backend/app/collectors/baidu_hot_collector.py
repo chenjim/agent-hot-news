@@ -4,10 +4,8 @@ from typing import List
 from urllib.parse import unquote, parse_qs, urlparse
 from bs4 import BeautifulSoup
 from app.collectors.base import BaseCollector, RawArticle
-from app.core.config import get_settings
+from app.utils.cookies import load_cookie
 from loguru import logger
-
-settings = get_settings()
 
 
 class BaiduHotCollector(BaseCollector):
@@ -28,11 +26,11 @@ class BaiduHotCollector(BaseCollector):
             "Accept-Language": "zh-CN,zh;q=0.9",
         }
 
-        cookie = settings.BAIDU_COOKIE or self.extra_config.get("cookie", "")
+        cookie = load_cookie("baidu")
         if cookie:
             headers["Cookie"] = cookie
         else:
-            logger.warning(f"[{self.name}] No BAIDU_COOKIE configured")
+            logger.warning(f"[{self.name}] No cookie.baidu.txt found")
 
         async with httpx.AsyncClient(
             timeout=30.0, follow_redirects=True
@@ -87,9 +85,14 @@ class BaiduHotCollector(BaseCollector):
                     except ValueError:
                         pass
 
+                # Baidu search URLs are differentiated by the ?wd= query param;
+                # _normalize_url() strips the query string, which collapses every
+                # search link into the same URL. Use the full href instead.
+                article_url = href.strip() if href else f"baidu://{self.name}/{quote(title)}"
+
                 articles.append(
                     RawArticle(
-                        url=self._normalize_url(href),
+                        url=article_url,
                         title=title,
                         summary=None,
                         source_name=self.name,

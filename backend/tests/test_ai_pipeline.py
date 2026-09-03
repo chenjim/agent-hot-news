@@ -113,8 +113,8 @@ class TestSummarizerService:
     async def test_summarize_cluster_mock(self):
         service = SummarizerService()
         mock_content = (
-            '{"title": "AI News", "summary": "AI is great", "category": "tech", '
-            '"sentiment": "positive", "entities": ["OpenAI"]}'
+            '{"title": "AI News", "summary": "AI is great", "detail": "AI is great indeed", '
+            '"category": "tech", "sentiment": "positive", "entities": ["OpenAI"]}'
         )
 
         mock_response = MagicMock()
@@ -260,3 +260,84 @@ class TestAIPipeline:
         assert event.sentiment == "negative"
         assert event.articles_count == 2
         assert event.sources_count == 2
+
+    def test_update_event_skips_duplicate_source_title(self, db):
+        """Same source with same title should not be added twice to an event."""
+        now = datetime.now(timezone.utc)
+        article1 = Article(title="Same Title", url="http://old.com", source_name="juejin", fetched_at=now)
+        db.add(article1)
+        db.flush()
+
+        event = HotEvent(title="Event", summary="E", hot_score=10.0, articles_count=1, sources_count=1, embedding_centroid=[0.0] * 1536)
+        db.add(event)
+        db.flush()
+
+        ea1 = EventArticle(event_id=event.id, article_id=article1.id)
+        db.add(ea1)
+        db.commit()
+
+        # Different URL but same source and title
+        article2 = Article(title="Same Title", url="http://new.com", source_name="juejin", fetched_at=now)
+        db.add(article2)
+        db.commit()
+
+        pipeline = AIPipeline(db)
+        pipeline._update_event(event, [article2], {"title": "Event"}, [0.0] * 1536, 10.0)
+        db.commit()
+
+        db.refresh(event)
+        assert event.articles_count == 1
+        assert event.sources_count == 1
+
+    def test_create_event_dedupes_by_source_and_title(self, db):
+        """Cluster with duplicate (source_name, title) should only link one copy."""
+        now = datetime.now(timezone.utc)
+        article1 = Article(title="Dup Title", url="http://a.com", source_name="S1", fetched_at=now)
+        article2 = Article(title="Dup Title", url="http://b.com", source_name="S1", fetched_at=now)
+        db.add_all([article1, article2])
+        db.commit()
+
+        pipeline = AIPipeline(db)
+        pipeline._create_event(
+            [article1, article2],
+            {"title": "Event", "summary": "S", "category": "tech", "sentiment": "neutral", "entities": []},
+            [0.0] * 1536,
+            10.0,
+        )
+        db.commit()
+
+        event = db.query(HotEvent).first()
+        assert event is not None
+        assert event.articles_count == 1
+        assert event.sources_count == 1
+        assert db.query(EventArticle).count() == 1
+
+    def test_update_event_dedupes_same_batch(self, db):
+        """Incoming batch with duplicates should only add one article to the event."""
+        now = datetime.now(timezone.utc)
+        article1 = Article(title="Existing", url="http://old.com", source_name="S1", fetched_at=now)
+        db.add(article1)
+        db.flush()
+
+        event = HotEvent(title="Event", summary="E", hot_score=10.0, articles_count=1, sources_count=1, embedding_centroid=[0.0] * 1536)
+        db.add(event)
+        db.flush()
+
+        ea1 = EventArticle(event_id=event.id, article_id=article1.id)
+        db.add(ea1)
+        db.commit()
+
+        # Two new articles with same source+title but different URLs
+        article2 = Article(title="Dup", url="http://new1.com", source_name="S2", fetched_at=now)
+        article3 = Article(title="Dup", url="http://new2.com", source_name="S2", fetched_at=now)
+        db.add_all([article2, article3])
+        db.commit()
+
+        pipeline = AIPipeline(db)
+        pipeline._update_event(event, [article2, article3], {"title": "Event"}, [0.0] * 1536, 10.0)
+        db.commit()
+
+        db.refresh(event)
+        assert event.articles_count == 2  # existing + one new
+        assert event.sources_count == 2
+        assert db.query(EventArticle).count() == 2

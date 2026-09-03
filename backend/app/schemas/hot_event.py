@@ -7,6 +7,7 @@ class HotEventListItem(BaseModel):
     id: int
     title: str
     summary: Optional[str] = None
+    detail: Optional[str] = None
     category: Optional[str] = None
     hot_score: float
     trend: str
@@ -33,6 +34,7 @@ class SourceItem(BaseModel):
     url: str
     title: str
     hot_score: float
+    content: Optional[str] = None
 
 
 class HotEventDetail(HotEventListItem):

@@ -2,10 +2,8 @@ import httpx
 import re
 from typing import List
 from app.collectors.base import BaseCollector, RawArticle
-from app.core.config import get_settings
+from app.utils.cookies import load_cookie
 from loguru import logger
-
-settings = get_settings()
 
 
 class ZhihuCollector(BaseCollector):
@@ -24,11 +22,11 @@ class ZhihuCollector(BaseCollector):
             "Referer": "https://www.zhihu.com/hot",
         }
 
-        cookie = settings.ZHIHU_COOKIE or self.extra_config.get("cookie", "")
+        cookie = load_cookie("zhihu")
         if cookie:
             headers["Cookie"] = cookie
         else:
-            logger.warning(f"[{self.name}] No ZHIHU_COOKIE configured, fetch may fail")
+            logger.warning(f"[{self.name}] No cookie.zhihu.txt found, fetch may fail")
 
         async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
             try:

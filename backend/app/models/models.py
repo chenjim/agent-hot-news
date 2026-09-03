@@ -48,6 +48,7 @@ class HotEvent(Base):
     id = Column(Integer, primary_key=True, index=True)
     title = Column(String(256), nullable=False)
     summary = Column(Text)
+    detail = Column(Text)  # AI 生成的详细摘要（150-300字）
     category = Column(String(64), index=True)
     hot_score = Column(Float, default=0.0, index=True)
     trend = Column(String(16), default="stable")  # up, down, stable

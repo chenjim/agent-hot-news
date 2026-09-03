@@ -33,9 +33,6 @@ export default function HomePage() {
         <section className="mb-8">
           <div className="flex items-center justify-between">
             <div>
-              <h2 className="text-3xl font-extrabold tracking-tight sm:text-4xl">
-                今日热点
-              </h2>
               <p className="mt-2 text-muted-foreground">
                 AI 实时聚合 {events.length} 个正在发酵的热点事件
               </p>
@@ -90,7 +87,7 @@ export default function HomePage() {
 
       {/* Footer */}
       <footer className="border-t border-border py-6 text-center text-sm text-muted-foreground">
-        <p>Agent Hot News — AI 驱动的多源热点聚合</p>
+        <p>今日热点 — AI 驱动的多源热点聚合</p>
       </footer>
 
       <ToastNotification />

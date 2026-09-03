@@ -1,5 +1,6 @@
+import { useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { ArrowLeft, TrendingUp, TrendingDown, Flame, Clock, Globe, Newspaper } from 'lucide-react';
+import { ArrowLeft, TrendingUp, TrendingDown, Flame, Clock, Globe, Newspaper, ChevronDown, ChevronUp } from 'lucide-react';
 import Header from '@/components/Header';
 import { useHotEventDetail } from '@/hooks/useApi';
 import { cn, formatRelativeTime, getSentimentColor, getSentimentLabel } from '@/lib/utils';
@@ -14,6 +15,7 @@ function TrendIcon({ trend, className }: { trend: string; className?: string }) 
 export default function EventDetailPage() {
   const { id } = useParams<{ id: string }>();
   const { event, error, isLoading } = useHotEventDetail(id ? parseInt(id) : null);
+  const [expandedSources, setExpandedSources] = useState<Set<number>>(new Set());
 
   if (error) {
     return (
@@ -116,6 +118,16 @@ export default function EventDetailPage() {
           )}
         </section>
 
+        {/* Detailed summary */}
+        {event.detail && (
+          <section className="mb-8 rounded-2xl border border-border bg-card p-6 sm:p-8">
+            <h2 className="mb-3 text-lg font-bold">详细简介</h2>
+            <p className="text-base leading-relaxed text-muted-foreground whitespace-pre-line">
+              {event.detail}
+            </p>
+          </section>
+        )}
+
         <div className="grid gap-6 lg:grid-cols-3">
           {/* Timeline */}
           <section className="lg:col-span-2">
@@ -160,34 +172,50 @@ export default function EventDetailPage() {
                 event.sources.map((source, i) => {
                   const baiduSearchUrl = `https://www.baidu.com/s?ie=utf-8&wd=${encodeURIComponent(source.title)}`;
                   const isTianapi = !source.url || source.url.startsWith('tianapi://');
-                  return isTianapi ? (
-                    <a
+                  const linkUrl = isTianapi ? baiduSearchUrl : source.url;
+                  const isExpanded = expandedSources.has(i);
+                  const hasContent = source.content && source.content.trim().length > 0;
+                  return (
+                    <div
                       key={i}
-                      href={baiduSearchUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="block rounded-lg border border-border bg-card p-3 transition-all hover:border-primary/30 hover:shadow-md"
+                      className="rounded-lg border border-border bg-card transition-all hover:border-primary/30 hover:shadow-md"
                     >
-                      <div className="flex items-center justify-between">
-                        <span className="text-xs font-medium text-primary">{source.name}</span>
-                        <span className="text-xs text-muted-foreground">{source.hot_score.toFixed(0)}</span>
-                      </div>
-                      <p className="mt-1 line-clamp-2 text-sm">{source.title}</p>
-                    </a>
-                  ) : (
-                    <a
-                      key={i}
-                      href={source.url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="block rounded-lg border border-border bg-card p-3 transition-all hover:border-primary/30 hover:shadow-md"
-                    >
-                      <div className="flex items-center justify-between">
-                        <span className="text-xs font-medium text-primary">{source.name}</span>
-                        <span className="text-xs text-muted-foreground">{source.hot_score.toFixed(0)}</span>
-                      </div>
-                      <p className="mt-1 line-clamp-2 text-sm">{source.title}</p>
-                    </a>
+                      <a
+                        href={linkUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="block p-3"
+                      >
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-medium text-primary">{source.name}</span>
+                          <span className="text-xs text-muted-foreground">{source.hot_score.toFixed(0)}</span>
+                        </div>
+                        <p className="mt-1 line-clamp-2 text-sm">{source.title}</p>
+                      </a>
+                      {hasContent && (
+                        <div className="border-t border-border px-3 pb-2">
+                          <button
+                            onClick={() => {
+                              setExpandedSources((prev) => {
+                                const next = new Set(prev);
+                                if (next.has(i)) next.delete(i);
+                                else next.add(i);
+                                return next;
+                              });
+                            }}
+                            className="flex w-full items-center gap-1 py-2 text-xs text-muted-foreground transition-colors hover:text-primary"
+                          >
+                            {isExpanded ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+                            {isExpanded ? '收起内容' : '查看内容'}
+                          </button>
+                          {isExpanded && (
+                            <p className="text-xs leading-relaxed text-muted-foreground whitespace-pre-line">
+                              {source.content}
+                            </p>
+                          )}
+                        </div>
+                      )}
+                    </div>
                   );
                 })
               )}

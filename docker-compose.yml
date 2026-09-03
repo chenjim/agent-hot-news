@@ -1,7 +1,8 @@
 services:
   redis:
-    image: redis:7-alpine
+    image: redis:7.4.8-alpine
     container_name: hotnews-redis
+    restart: always
     ports:
       - "51179:6379"
     volumes:
@@ -15,6 +16,7 @@ services:
   postgres:
     image: pgvector/pgvector:pg17
     container_name: hotnews-postgres
+    restart: always
     ports:
       - "51132:5432"
     volumes:
@@ -79,6 +81,9 @@ services:
       context: ./frontend
       dockerfile: Dockerfile
     container_name: hotnews-frontend
+    restart: always
+    mem_limit: 1g
+    mem_reservation: 512m
     ports:
       - "51131:3000"
     volumes:

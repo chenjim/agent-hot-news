@@ -12,6 +12,8 @@ from app.ai_pipeline.pipeline import AIPipeline
 from app.models.models import Article, HotEvent
 from app.core.config import get_settings
 
+from app.scheduler.state import set_last_fetch_time, set_last_ai_time
+
 settings = get_settings()
 scheduler = AsyncIOScheduler()
 
@@ -107,6 +109,8 @@ def fetch_task():
     Runs in a background thread (via AsyncIOScheduler's default executor)
     so sync SQLAlchemy operations do not block the event loop.
     """
+    from app.scheduler.state import set_last_fetch_time
+    set_last_fetch_time()  # Mark fetch start time
 
     async def _run():
         db = SessionLocal()
@@ -114,29 +118,7 @@ def fetch_task():
             manager = CollectorManager(db)
             articles = await manager.fetch_all()
 
-            # Deduplicate by URL before saving (bulk check to avoid N+1)
-            seen_urls = set()
-            existing_urls = {url for url, in db.query(Article.url).all()}
-            new_count = 0
-            for raw in articles:
-                if raw.url in seen_urls or raw.url in existing_urls:
-                    continue
-                seen_urls.add(raw.url)
-
-                article = Article(
-                    url=raw.url,
-                    title=raw.title,
-                    summary=raw.summary,
-                    content=raw.content,
-                    source_name=raw.source_name,
-                    source_url=raw.source_url,
-                    published_at=raw.published_at,
-                    raw_hot_score=raw.raw_hot_score,
-                    language=raw.language,
-                )
-                db.add(article)
-                new_count += 1
-
+            new_count = manager.save_articles(articles)
             db.commit()
             logger.info(f"Fetch task complete: {new_count} new articles saved")
         except Exception as e:
@@ -166,6 +148,8 @@ def ai_process_task():
     Runs in a background thread (via AsyncIOScheduler's default executor)
     so sync SQLAlchemy operations do not block the event loop.
     """
+    from app.scheduler.state import set_last_ai_time
+    set_last_ai_time()  # Mark AI process start time
 
     async def _run():
         db = SessionLocal()

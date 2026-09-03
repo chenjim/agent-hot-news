@@ -1,5 +1,6 @@
 import pytest
-from datetime import datetime
+import httpx
+from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from app.collectors.base import BaseCollector, RawArticle
@@ -13,7 +14,7 @@ from app.collectors.juejin_collector import JuejinCollector
 from app.collectors.zhihu_collector import ZhihuCollector
 from app.collectors.weibo_hot_collector import WeiboHotCollector
 from app.collectors.tianapi_collector import TianapiCollector
-from app.models.models import Source, SourceType, SourceStatus
+from app.models.models import Source, SourceType, SourceStatus, Article
 
 
 class DummyCollector(BaseCollector):
@@ -40,12 +41,14 @@ class TestRSSCollector:
             <item>
               <title>Test Article</title>
               <link>http://example.com/article?track=1</link>
+              <guid>http://example.com/article</guid>
               <description>This is a test summary.</description>
               <pubDate>Mon, 01 Jan 2024 00:00:00 GMT</pubDate>
             </item>
             <item>
               <title>Second Article</title>
               <link>http://example.com/second/</link>
+              <guid>http://example.com/second</guid>
               <pubDate>Tue, 02 Jan 2024 12:30:45 GMT</pubDate>
             </item>
           </channel>
@@ -112,6 +115,97 @@ class TestRSSCollector:
         with patch("app.collectors.rss_collector.httpx.AsyncClient", return_value=mock_client):
             with pytest.raises(Exception, match="RSS fetch failed for Bad RSS"):
                 await collector.fetch()
+
+
+    @pytest.mark.asyncio
+    async def test_fetch_rss_uses_default_user_agent(self):
+        rss_xml = """<?xml version="1.0" encoding="UTF-8"?>
+        <rss version="2.0"><channel></channel></rss>"""
+
+        mock_response = MagicMock()
+        mock_response.content = rss_xml.encode("utf-8")
+        mock_response.raise_for_status = MagicMock()
+
+        captured_headers = {}
+
+        async def fake_get(url, headers=None):
+            captured_headers.update(headers or {})
+            return mock_response
+
+        mock_client = AsyncMock()
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+        mock_client.get = AsyncMock(side_effect=fake_get)
+
+        collector = RSSCollector({"name": "UA RSS", "endpoint": "http://example.com/rss"})
+
+        with patch("app.collectors.rss_collector.httpx.AsyncClient", return_value=mock_client):
+            await collector.fetch()
+
+        assert "User-Agent" in captured_headers
+        assert "Chrome" in captured_headers["User-Agent"]
+
+    @pytest.mark.asyncio
+    async def test_fetch_rss_uses_config_headers(self):
+        rss_xml = """<?xml version="1.0" encoding="UTF-8"?>
+        <rss version="2.0"><channel></channel></rss>"""
+
+        mock_response = MagicMock()
+        mock_response.content = rss_xml.encode("utf-8")
+        mock_response.raise_for_status = MagicMock()
+
+        captured_headers = {}
+
+        async def fake_get(url, headers=None):
+            captured_headers.update(headers or {})
+            return mock_response
+
+        mock_client = AsyncMock()
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+        mock_client.get = AsyncMock(side_effect=fake_get)
+
+        collector = RSSCollector({
+            "name": "Custom UA RSS",
+            "endpoint": "http://example.com/rss",
+            "config": {"headers": {"User-Agent": "CustomBot/1.0"}},
+        })
+
+        with patch("app.collectors.rss_collector.httpx.AsyncClient", return_value=mock_client):
+            await collector.fetch()
+
+        assert captured_headers.get("User-Agent") == "CustomBot/1.0"
+
+
+    @pytest.mark.asyncio
+    async def test_fetch_rss_uses_proxy(self):
+        rss_xml = """<?xml version="1.0" encoding="UTF-8"?>
+        <rss version="2.0"><channel></channel></rss>"""
+
+        mock_response = MagicMock()
+        mock_response.content = rss_xml.encode("utf-8")
+        mock_response.raise_for_status = MagicMock()
+
+        captured_kwargs = {}
+
+        def fake_async_client(**kwargs):
+            captured_kwargs.update(kwargs)
+            mock_client = AsyncMock()
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=False)
+            mock_client.get = AsyncMock(return_value=mock_response)
+            return mock_client
+
+        collector = RSSCollector({
+            "name": "Proxy RSS",
+            "endpoint": "http://example.com/rss",
+            "config": {"proxy": "http://127.0.0.1:7890"},
+        })
+
+        with patch("app.collectors.rss_collector.httpx.AsyncClient", side_effect=fake_async_client):
+            await collector.fetch()
+
+        assert captured_kwargs.get("proxy") == "http://127.0.0.1:7890"
 
 
 class TestAPICollector:
@@ -266,6 +360,118 @@ class TestCollectorManager:
         assert s2.status == SourceStatus.ERROR
         assert "Boom" in s2.last_error
 
+    def test_save_articles_creates_new(self, db):
+        manager = CollectorManager(db)
+        raw = [
+            RawArticle(url="http://example.com/1", title="T1", source_name="S1", raw_hot_score=10.0),
+            RawArticle(url="http://example.com/2", title="T2", source_name="S1", raw_hot_score=20.0),
+        ]
+        count = manager.save_articles(raw)
+        db.commit()
+
+        assert count == 2
+        articles = db.query(Article).order_by(Article.url).all()
+        assert articles[0].title == "T1"
+        assert articles[0].raw_hot_score == 10.0
+        assert articles[1].title == "T2"
+
+    def test_save_articles_updates_existing(self, db):
+        from datetime import timezone
+
+        old_time = datetime(2023, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
+        article = Article(
+            url="http://example.com/1",
+            title="T1",
+            source_name="S1",
+            raw_hot_score=5.0,
+            fetched_at=old_time,
+            published_at=None,
+        )
+        db.add(article)
+        db.commit()
+
+        manager = CollectorManager(db)
+        raw = [
+            RawArticle(
+                url="http://example.com/1",
+                title="T1",
+                source_name="S1",
+                raw_hot_score=99.0,
+                published_at=datetime(2024, 6, 1, 10, 0, 0, tzinfo=timezone.utc),
+            )
+        ]
+        count = manager.save_articles(raw)
+        db.commit()
+
+        assert count == 0
+        db.refresh(article)
+        assert article.raw_hot_score == 99.0
+        # SQLite stores naive datetimes, so compare without tzinfo
+        assert article.published_at.replace(tzinfo=None) == datetime(2024, 6, 1, 10, 0, 0)
+        assert article.fetched_at > old_time.replace(tzinfo=None)
+
+    def test_save_articles_dedupes_same_batch(self, db):
+        manager = CollectorManager(db)
+        raw = [
+            RawArticle(url="http://example.com/1", title="T1", source_name="S1"),
+            RawArticle(url="http://example.com/1", title="T1 dup", source_name="S1"),
+        ]
+        count = manager.save_articles(raw)
+        db.commit()
+
+        assert count == 1
+        assert db.query(Article).count() == 1
+
+    def test_save_articles_dedupes_by_source_and_title(self, db):
+        """Same source + title with different URLs should be treated as one article."""
+        manager = CollectorManager(db)
+        raw = [
+            RawArticle(url="http://example.com/a", title="Duplicate Title", source_name="S1", raw_hot_score=10.0),
+            RawArticle(url="http://example.com/b", title="Duplicate Title", source_name="S1", raw_hot_score=20.0),
+        ]
+        count = manager.save_articles(raw)
+        db.commit()
+
+        assert count == 1
+        assert db.query(Article).count() == 1
+        article = db.query(Article).first()
+        # First item wins within the same batch; the second is skipped
+        assert article.raw_hot_score == 10.0
+
+    def test_save_articles_updates_existing_by_source_and_title(self, db):
+        """When a duplicate arrives later under a different URL, update the existing record."""
+        old_time = datetime(2023, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
+        article = Article(
+            url="http://old.com/1",
+            title="Same Title",
+            source_name="S1",
+            raw_hot_score=5.0,
+            fetched_at=old_time,
+            published_at=None,
+        )
+        db.add(article)
+        db.commit()
+
+        manager = CollectorManager(db)
+        raw = [
+            RawArticle(
+                url="http://new.com/2",
+                title="Same Title",
+                source_name="S1",
+                raw_hot_score=99.0,
+                published_at=datetime(2024, 6, 1, 10, 0, 0, tzinfo=timezone.utc),
+            )
+        ]
+        count = manager.save_articles(raw)
+        db.commit()
+
+        assert count == 0
+        db.refresh(article)
+        assert article.url == "http://old.com/1"  # URL should not change
+        assert article.raw_hot_score == 99.0
+        assert article.published_at.replace(tzinfo=None) == datetime(2024, 6, 1, 10, 0, 0)
+        assert article.fetched_at > old_time.replace(tzinfo=None)
+
 
 class TestBaiduHotCollector:
     @pytest.mark.asyncio
@@ -297,15 +503,16 @@ class TestBaiduHotCollector:
         )
 
         with patch("app.collectors.baidu_hot_collector.httpx.AsyncClient", return_value=mock_client):
-            with patch("app.collectors.baidu_hot_collector.settings") as mock_settings:
-                mock_settings.BAIDU_COOKIE = "test=1"
+            with patch("app.utils.cookies.load_cookie", return_value="test=1"):
                 articles = await collector.fetch()
 
         assert len(articles) == 2
         assert articles[0].title == "测试标题"
+        assert articles[0].url == "https://www.baidu.com/s?wd=%E6%B5%8B%E8%AF%95%E6%A0%87%E9%A2%98"
         assert articles[0].raw_hot_score == 1234567.0
         assert articles[0].extra["rank"] == 1
         assert articles[1].title == "第二条"
+        assert articles[1].url == "https://www.baidu.com/s?wd=%E7%AC%AC%E4%BA%8C%E6%9D%A1"
         assert articles[1].raw_hot_score == 890123.0
 
     @pytest.mark.asyncio
@@ -325,11 +532,21 @@ class TestBaiduHotCollector:
         )
 
         with patch("app.collectors.baidu_hot_collector.httpx.AsyncClient", return_value=mock_client):
-            with patch("app.collectors.baidu_hot_collector.settings") as mock_settings:
-                mock_settings.BAIDU_COOKIE = ""
+            with patch("app.utils.cookies.load_cookie", return_value=""):
                 articles = await collector.fetch()
 
         assert articles == []
+
+    def test_baidu_hot_preserves_query_params(self):
+        """Baidu links must keep ?wd=... so different topics don't collapse to one URL."""
+        collector = BaiduHotCollector(
+            {"name": "baidu_hot", "endpoint": "https://top.baidu.com/board?tab=realtime", "config": {}}
+        )
+        url1 = "https://www.baidu.com/s?wd=%E6%B5%8B%E8%AF%95%E6%A0%87%E9%A2%98"
+        url2 = "https://www.baidu.com/s?wd=%E7%AC%AC%E4%BA%8C%E6%9D%A1"
+        # _normalize_url strips query params — this would be the old buggy behaviour
+        assert collector._normalize_url(url1) == collector._normalize_url(url2)
+        # The collector now uses the full URL (verified in test_fetch_baidu_hot_success)
 
 
 class TestGitHubTrendingCollector:
@@ -482,6 +699,7 @@ class TestJuejinCollector:
                             "article_id": "abc123",
                             "brief_content": "Summary 1",
                             "view_count": 1000,
+                            "ctime": "1700000000",
                         }
                     }
                 },
@@ -518,8 +736,10 @@ class TestJuejinCollector:
         assert articles[0].url == "https://juejin.cn/post/abc123"
         assert articles[0].summary == "Summary 1"
         assert articles[0].raw_hot_score == 1000.0
+        assert articles[0].published_at == datetime(2023, 11, 14, 22, 13, 20, tzinfo=timezone.utc)
         assert articles[0].extra["rank"] == 1
         assert articles[1].raw_hot_score == 500.0
+        assert articles[1].published_at is None
 
 
 class TestZhihuCollector:
@@ -560,8 +780,7 @@ class TestZhihuCollector:
         )
 
         with patch("app.collectors.zhihu_collector.httpx.AsyncClient", return_value=mock_client):
-            with patch("app.collectors.zhihu_collector.settings") as mock_settings:
-                mock_settings.ZHIHU_COOKIE = "test=1"
+            with patch("app.utils.cookies.load_cookie", return_value="test=1"):
                 articles = await collector.fetch()
 
         assert len(articles) == 2
@@ -598,8 +817,7 @@ class TestWeiboHotCollector:
         )
 
         with patch("app.collectors.weibo_hot_collector.httpx.AsyncClient", return_value=mock_client):
-            with patch("app.collectors.weibo_hot_collector.settings") as mock_settings:
-                mock_settings.WEIBO_COOKIE = "test=1"
+            with patch("app.utils.cookies.load_cookie", return_value="test=1"):
                 articles = await collector.fetch()
 
         assert len(articles) == 2

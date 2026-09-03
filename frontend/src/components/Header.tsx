@@ -17,7 +17,7 @@ export default function Header() {
         <div className="flex items-center gap-2">
           <Flame className="h-6 w-6 text-orange-500" />
           <Link to="/" className="text-xl font-bold tracking-tight hover:opacity-80 transition-opacity">
-            Agent Hot News
+            今日热点
           </Link>
         </div>
 

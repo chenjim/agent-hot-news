@@ -42,7 +42,7 @@
 | **国内综合** | 新浪新闻、网易新闻、腾讯新闻、搜狐新闻 | RSS / API / 爬虫 |
 | **国内聚合** | 今日头条热榜、百度热搜、微博热搜 | API /  unofficial 端点 |
 | **科技互联网** | 36氪、虎嗅、IT之家、TechCrunch (EN) | RSS / API |
-| **财经商业** | 财新、华尔街见闻、雪球 | RSS / API |
+| **财经商业** | 经济观察网、FT中文网、财新、华尔街见闻、雪球 | RSS / API |
 | **社交媒体** | Twitter/X Trending、Reddit Hot、Hacker News | 官方 API / RSS |
 | **国际媒体** | BBC、Reuters、CNN、The Guardian | RSS / API |
 | **开发者社区** | GitHub Trending、Dev.to、掘金热榜 | API / 爬虫 |

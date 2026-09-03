@@ -5,14 +5,22 @@ from app.models.models import Article, HotEvent, EventArticle, Source, SourceTyp
 
 class TestHotEventsAPI:
     def test_list_hot_events_empty(self, client):
-        response = client.get("/api/v1/hot-events")
+        # Use a unique category to avoid cache hits from other tests
+        response = client.get("/api/v1/hot-events?category=__empty_test__")
         assert response.status_code == 200
         assert response.json() == []
 
     def test_list_hot_events_with_data(self, client, db):
         now = datetime.now(timezone.utc)
-        e1 = HotEvent(title="Event 1", summary="S1", category="tech", hot_score=100.0, last_updated_at=now)
-        e2 = HotEvent(title="Event 2", summary="S2", category="finance", hot_score=50.0, last_updated_at=now)
+        # Use distinct first_seen_at to guarantee ordering
+        e1 = HotEvent(
+            title="Event 1", summary="S1", category="tech", hot_score=100.0,
+            first_seen_at=now, last_updated_at=now,
+        )
+        e2 = HotEvent(
+            title="Event 2", summary="S2", category="finance", hot_score=50.0,
+            first_seen_at=now - timedelta(hours=1), last_updated_at=now,
+        )
         db.add_all([e1, e2])
         db.commit()
 
@@ -71,6 +79,43 @@ class TestHotEventsAPI:
         response = client.get("/api/v1/hot-events/9999")
         assert response.status_code == 404
         assert response.json()["detail"] == "Event not found"
+
+
+from app.seed import DEFAULT_SOURCES
+
+
+class TestSeedSources:
+    def test_default_finance_sources_present(self, db):
+        from app.seed import seed_sources
+
+        seed_sources(db)
+        names = {s.name for s in db.query(Source).all()}
+        assert "经济观察网" in names
+        assert "FT中文网" in names
+
+    def test_default_sources_count(self, db):
+        from app.seed import seed_sources
+
+        seed_sources(db)
+        count = db.query(Source).count()
+        assert count == len(DEFAULT_SOURCES)
+
+    def test_default_sources_update_existing_config(self, db):
+        from app.seed import seed_sources, DEFAULT_SOURCES
+
+        existing = Source(
+            name="FT中文网",
+            type=SourceType.RSS,
+            endpoint="https://www.ftchinese.com/rss/news",
+            config={"language": "zh"},
+        )
+        db.add(existing)
+        db.commit()
+
+        seed_sources(db)
+        db.refresh(existing)
+        assert existing.config.get("proxy") == "http://127.0.0.1:7890"
+        assert "headers" in existing.config
 
 
 class TestSourcesAPI:

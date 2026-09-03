@@ -14,13 +14,16 @@ class Settings(BaseSettings):
     TIANAPI_KEY: str = ""
 
     # Weibo
-    WEIBO_COOKIE: str = ""
+    # Cookie moved to cookie.weibo.txt
 
     # Baidu
-    BAIDU_COOKIE: str = ""
+    # Cookie moved to cookie.baidu.txt
 
     # Zhihu
-    ZHIHU_COOKIE: str = ""
+    # Cookie moved to cookie.zhihu.txt
+
+    # Toutiao
+    # Cookie moved to cookie.toutiao.txt
 
     # OpenAI
     OPENAI_API_KEY: str = ""

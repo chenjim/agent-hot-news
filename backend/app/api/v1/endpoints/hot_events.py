@@ -70,12 +70,14 @@ async def get_hot_event_detail(
             "url": article.url,
             "title": article.title,
             "hot_score": article.raw_hot_score,
+            "content": article.content,
         })
 
     return {
         "id": event.id,
         "title": event.title,
         "summary": event.summary,
+        "detail": event.detail,
         "category": event.category,
         "hot_score": event.hot_score,
         "trend": event.trend,

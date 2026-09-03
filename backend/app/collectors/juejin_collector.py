@@ -1,5 +1,6 @@
 import httpx
 from typing import List
+from datetime import datetime, timezone
 from app.collectors.base import BaseCollector, RawArticle
 from loguru import logger
 
@@ -55,6 +56,15 @@ class JuejinCollector(BaseCollector):
                 summary = article_info.get("brief_content", "") or None
                 hot_value = article_info.get("view_count", 0) or article_info.get("digg_count", 0)
 
+                # Parse ctime (creation timestamp in seconds)
+                ctime = article_info.get("ctime")
+                published = None
+                if ctime:
+                    try:
+                        published = datetime.fromtimestamp(int(ctime), tz=timezone.utc)
+                    except (ValueError, TypeError):
+                        pass
+
                 articles.append(
                     RawArticle(
                         url=self._normalize_url(url),
@@ -62,6 +72,7 @@ class JuejinCollector(BaseCollector):
                         summary=summary[:1000] if summary else None,
                         source_name=self.name,
                         source_url=self.endpoint,
+                        published_at=published,
                         raw_hot_score=float(hot_value) if hot_value else 0.0,
                         language=self.extra_config.get("language", "zh"),
                         extra={"rank": idx + 1},

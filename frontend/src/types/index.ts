@@ -2,6 +2,7 @@ export interface HotEvent {
   id: number;
   title: string;
   summary: string | null;
+  detail: string | null;
   category: string | null;
   hot_score: number;
   trend: 'up' | 'down' | 'stable';
@@ -32,6 +33,7 @@ export interface SourceItem {
   url: string;
   title: string;
   hot_score: number;
+  content: string | null;
 }
 
 export interface RelatedEvent {
@@ -61,6 +63,7 @@ export interface Source {
   status: SourceStatus;
   last_fetched_at: string | null;
   created_at: string;
+  fetched_today?: number;
 }
 
 export interface AdminStats {
@@ -75,6 +78,7 @@ export interface AdminStats {
     status: string | null;
     last_fetched_at: string | null;
     last_error: string | null;
+    fetched_today?: number;
   }>;
   server_time?: string;
 }

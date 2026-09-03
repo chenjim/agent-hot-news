@@ -4,11 +4,8 @@ import type { HotEvent } from '@/types';
 import {
   cn,
   formatRelativeTime,
-  getSentimentColor,
-  getSentimentLabel,
   isToday,
 } from '@/lib/utils';
-import TrendSparkline from './TrendSparkline';
 
 interface HotEventCardProps {
   event: HotEvent;
@@ -23,32 +20,13 @@ function TrendIcon({ trend, className }: { trend: string; className?: string }) 
 }
 
 export default function HotEventCard({ event, index }: HotEventCardProps) {
-  const rankColors = [
-    'from-orange-500 to-red-600',
-    'from-amber-400 to-orange-500',
-    'from-yellow-400 to-amber-500',
-  ];
-  const rankGradient = index < 3 ? rankColors[index] : 'from-gray-400 to-gray-500';
   const today = isToday(event.first_seen_at);
 
   return (
     <Link
       to={`/event/${event.id}`}
-      className={cn(
-        'group relative block overflow-hidden rounded-xl border border-border/50 bg-card',
-        'transition-all duration-300 hover:-translate-y-1 hover:shadow-xl hover:border-primary/20'
-      )}
+      className="group relative block overflow-hidden rounded-xl border border-border/70 bg-card transition-all duration-300 hover:-translate-y-0.5 hover:shadow-lg hover:shadow-primary/10 hover:border-primary/40"
     >
-      {/* Rank badge */}
-      <div
-        className={cn(
-          'absolute -right-8 -top-8 flex h-20 w-20 items-end justify-start rounded-full bg-gradient-to-br p-3 text-xs font-bold text-white opacity-90',
-          rankGradient
-        )}
-      >
-        #{index + 1}
-      </div>
-
       <div className="p-5">
         {/* Title */}
         <h3 className="mb-2 text-lg font-bold leading-snug group-hover:text-primary transition-colors">
@@ -57,7 +35,7 @@ export default function HotEventCard({ event, index }: HotEventCardProps) {
 
         {/* Summary */}
         {event.summary && (
-          <p className="mb-4 line-clamp-2 text-sm text-muted-foreground">
+          <p className="mb-4 line-clamp-2 min-h-[2.5rem] text-sm text-muted-foreground">
             {event.summary}
           </p>
         )}
@@ -74,18 +52,6 @@ export default function HotEventCard({ event, index }: HotEventCardProps) {
           {today && (
             <span className="rounded-full bg-orange-500 px-2 py-0.5 text-[10px] font-bold text-white">
               今日
-            </span>
-          )}
-
-          {/* Sentiment */}
-          {event.sentiment && (
-            <span
-              className={cn(
-                'rounded-full border px-2.5 py-1',
-                getSentimentColor(event.sentiment)
-              )}
-            >
-              {getSentimentLabel(event.sentiment)}
             </span>
           )}
 
@@ -107,18 +73,13 @@ export default function HotEventCard({ event, index }: HotEventCardProps) {
           </span>
         </div>
 
-        {/* Trend sparkline */}
-        <div className="mt-3">
-          <TrendSparkline data={event.trend_data || undefined} />
-        </div>
-
         {/* Entities */}
         {event.entities && event.entities.length > 0 && (
-          <div className="mt-3 flex flex-wrap gap-1.5">
+          <div className="mt-3 flex flex-nowrap gap-1.5 overflow-hidden">
             {event.entities.slice(0, 5).map((entity) => (
               <span
                 key={entity}
-                className="rounded-md bg-secondary px-2 py-0.5 text-xs text-secondary-foreground"
+                className="whitespace-nowrap rounded-md bg-secondary px-2 py-0.5 text-xs text-secondary-foreground"
               >
                 {entity}
               </span>
@@ -126,13 +87,6 @@ export default function HotEventCard({ event, index }: HotEventCardProps) {
           </div>
         )}
       </div>
-
-      {/* Bottom gradient bar for top 3 */}
-      {index < 3 && (
-        <div
-          className={cn('h-1 w-full bg-gradient-to-r', rankGradient)}
-        />
-      )}
     </Link>
   );
 }

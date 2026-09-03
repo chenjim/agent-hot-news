@@ -13,7 +13,7 @@ class AIPipeline:
     def __init__(self, db: Session):
         self.db = db
         self.embedding = EmbeddingService()
-        self.clustering = ClusteringService(eps=0.25, min_samples=2)
+        self.clustering = ClusteringService(eps=0.25, min_samples=3)
         self.summarizer = SummarizerService()
 
     async def run(self, max_articles: int = 500):
@@ -175,21 +175,31 @@ class AIPipeline:
         centroid: List[float],
         hot_score: float,
     ):
+        # Deduplicate by (source_name, title) within the cluster before linking
+        seen_source_titles = set()
+        deduped_articles = []
+        for a in articles:
+            key = (a.source_name, a.title)
+            if key not in seen_source_titles:
+                seen_source_titles.add(key)
+                deduped_articles.append(a)
+
         event = HotEvent(
             title=summary.get("title", "未知事件"),
             summary=summary.get("summary", ""),
+            detail=summary.get("detail", ""),
             category=summary.get("category", "other"),
             hot_score=hot_score,
             sentiment=summary.get("sentiment", "neutral"),
             entities=summary.get("entities", []),
-            articles_count=len(articles),
-            sources_count=len(set(a.source_name for a in articles)),
+            articles_count=len(deduped_articles),
+            sources_count=len(set(a.source_name for a in deduped_articles)),
             embedding_centroid=centroid,
         )
         self.db.add(event)
         self.db.flush()
 
-        for article in articles:
+        for article in deduped_articles:
             ea = EventArticle(event_id=event.id, article_id=article.id)
             self.db.add(ea)
 
@@ -205,6 +215,7 @@ class AIPipeline:
     ):
         event.title = summary.get("title", event.title)
         event.summary = summary.get("summary", event.summary)
+        event.detail = summary.get("detail", event.detail)
         event.category = summary.get("category", event.category)
         event.hot_score = hot_score
         event.sentiment = summary.get("sentiment", event.sentiment)
@@ -219,10 +230,23 @@ class AIPipeline:
             .all()
         ) if existing_article_ids else []
         existing_sources = {a.source_name for a in existing_articles}
+        existing_source_titles = {(a.source_name, a.title) for a in existing_articles}
 
-        # Add new article links (avoid duplicates)
+        # Deduplicate the incoming batch by (source_name, title) first
+        seen_source_titles_batch = set()
+        deduped_articles = []
+        for a in articles:
+            key = (a.source_name, a.title)
+            if key not in seen_source_titles_batch:
+                seen_source_titles_batch.add(key)
+                deduped_articles.append(a)
+
+        # Add new article links (avoid duplicates by id AND by source+title)
         existing_ids = set(existing_article_ids)
-        new_articles = [a for a in articles if a.id not in existing_ids]
+        new_articles = [
+            a for a in deduped_articles
+            if a.id not in existing_ids and (a.source_name, a.title) not in existing_source_titles
+        ]
         for article in new_articles:
             ea = EventArticle(event_id=event.id, article_id=article.id)
             self.db.add(ea)
