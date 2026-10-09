@@ -46,7 +46,7 @@ class Settings(BaseSettings):
     #   WRITE_TOKEN protects mutating endpoints (sources POST/PUT/DELETE, trigger-*)
     READ_TOKEN: str = ""
     WRITE_TOKEN: str = ""
-    # CORS：逗号分隔，空则用内置默认；如 CORS_ORIGINS=https://f.h89.cn:51130
+    # CORS：逗号分隔，空则用内置默认；如 CORS_ORIGINS=https://news.h89.cn
     CORS_ORIGINS: str = ""
     # Fetch intervals (random range, minutes)
     FETCH_INTERVAL_DAY_MIN: int = 30

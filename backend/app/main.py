@@ -36,7 +36,7 @@ app = FastAPI(
 def _cors_origins() -> list:
     if settings.CORS_ORIGINS.strip():
         return [o.strip() for o in settings.CORS_ORIGINS.split(",") if o.strip()]
-    origins = ["http://localhost:51131", "https://f.h89.cn:51130"]
+    origins = ["http://localhost:51131", "https://news.h89.cn"]
     if settings.DEBUG:
         origins.append("http://127.0.0.1:51131")
     return origins

@@ -1,6 +1,6 @@
 # Agent Hot News
 
-项目地址：<https://github.com/chenjim/agent-hot-news> | 预览：<https://f.h89.cn:51130/>
+项目地址：<https://github.com/chenjim/agent-hot-news> | 预览：<https://news.h89.cn/>
 
 > 每天早上打开新闻 App，满屏都是标题党？信息过载让人疲惫。这个项目想解决一个问题：**"今天到底发生了什么大事？"**
 

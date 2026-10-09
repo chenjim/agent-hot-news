@@ -1,6 +1,6 @@
 # Agent Hot News API
 
-所有接口挂在 `/api/v1` 前缀下，服务地址 `https://f.h89.cn:51130`。
+所有接口挂在 `/api/v1` 前缀下，服务地址 `https://news.h89.cn`。
 
 - 响应一律 JSON，编码 UTF-8。
 - **读接口**需要 `READ_TOKEN`，**写接口**需要 `WRITE_TOKEN`（见下方「鉴权」）。
@@ -82,7 +82,7 @@ GET /api/v1/hot-events
 
 ```bash
 curl -H "X-Read-Token: $READ_TOKEN" \
-  "https://f.h89.cn:51130/api/v1/hot-events?limit=30&tz=Asia/Shanghai"
+  "https://news.h89.cn/api/v1/hot-events?limit=30&tz=Asia/Shanghai"
 ```
 
 返回项字段：`id, title, summary, detail, category, hot_score, trend, sentiment, entities, articles_count, sources_count, first_seen_at, last_updated_at, aggregated_at, cover_image`。
@@ -109,7 +109,7 @@ GET /api/v1/hot-events/{event_id}
 
 ```bash
 curl -H "X-Read-Token: $READ_TOKEN" \
-  "https://f.h89.cn:51130/api/v1/hot-events/123"
+  "https://news.h89.cn/api/v1/hot-events/123"
 ```
 
 #### 3. 文章列表
@@ -253,7 +253,7 @@ POST /api/v1/admin/trigger-ai
 ## 完整示例
 
 ```bash
-BASE=https://f.h89.cn:51130
+BASE=https://news.h89.cn
 READ_TOKEN=你的读令牌
 WRITE_TOKEN=你的写令牌
 
