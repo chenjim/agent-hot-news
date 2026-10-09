@@ -472,6 +472,37 @@ class TestCollectorManager:
         assert article.published_at.replace(tzinfo=None) == datetime(2024, 6, 1, 10, 0, 0)
         assert article.fetched_at > old_time.replace(tzinfo=None)
 
+    def test_load_existing_and_known_predicate(self, db):
+        """摘要前去重：URL 或 来源+标题 命中的条目应判为「已在库」。"""
+        db.add(Article(url="http://example.com/1", title="T1", source_name="S1"))
+        db.commit()
+
+        manager = CollectorManager(db)
+        existing = manager.load_existing(
+            [
+                RawArticle(url="http://example.com/1", title="T1", source_name="S1"),
+                RawArticle(url="http://example.com/2", title="T2", source_name="S1"),
+            ]
+        )
+        is_known = manager.known_predicate(*existing)
+
+        assert is_known(RawArticle(url="http://example.com/1", title="改了标题", source_name="S1"))
+        assert is_known(RawArticle(url="http://other.com/9", title="T1", source_name="S1"))
+        assert not is_known(RawArticle(url="http://example.com/2", title="T2", source_name="S1"))
+
+    def test_save_articles_reuses_existing_index(self, db):
+        """传入 load_existing 结果时行为与自查询一致：首存新建，再存识别为已存在。"""
+        manager = CollectorManager(db)
+        raw = [RawArticle(url="http://example.com/1", title="T1", source_name="S1")]
+
+        existing = manager.load_existing(raw)
+        assert manager.save_articles(raw, existing=existing) == 1
+        db.commit()
+
+        existing2 = manager.load_existing(raw)
+        assert manager.save_articles(raw, existing=existing2) == 0
+        assert db.query(Article).count() == 1
+
 
 class TestBaiduHotCollector:
     @pytest.mark.asyncio

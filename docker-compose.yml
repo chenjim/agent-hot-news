@@ -60,8 +60,8 @@ services:
       HTTPS_PROXY: ${HTTPS_PROXY-http://192.168.31.165:7890}
       http_proxy: ${HTTP_PROXY-http://192.168.31.165:7890}
       https_proxy: ${HTTPS_PROXY-http://192.168.31.165:7890}
-      NO_PROXY: localhost,127.0.0.1,postgres,redis,backend
-      no_proxy: localhost,127.0.0.1,postgres,redis,backend
+      NO_PROXY: localhost,127.0.0.1,postgres,redis,backend,host.docker.internal
+      no_proxy: localhost,127.0.0.1,postgres,redis,backend,host.docker.internal
     env_file:
       - .env
     volumes:
@@ -69,6 +69,7 @@ services:
       # 遮蔽宿主机大目录，避免覆盖/拖慢容器（venv 约数 GB，会拖死 --reload 监听）
       - /app/venv
       - /app/__pycache__
+      # cookie.*.txt 住在 backend/，已随 ./backend:/app 进容器（/app/cookie.*.txt）
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
       interval: 10s
@@ -80,18 +81,18 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile
+      args:
+        # 读令牌在构建期烧进产物（vite 只在 build 时读 VITE_ 变量）；写令牌绝不注入
+        VITE_READ_TOKEN: ${READ_TOKEN-}
+        VITE_API_URL: /api/v1
     container_name: hotnews-frontend
     restart: always
     mem_limit: 1g
     mem_reservation: 512m
     ports:
       - "51131:3000"
-    volumes:
-      - ./frontend:/app
-      - /app/node_modules
-    environment:
-      - VITE_API_URL=/api/v1
-      - BACKEND_URL=http://backend:8000
+    # 生产构建产物在镜像内，不再挂载 ./frontend（挂载会盖掉 dist）
+    # 改前端代码后需重建：docker compose build frontend && docker compose up -d frontend
     depends_on:
       backend:
         condition: service_healthy

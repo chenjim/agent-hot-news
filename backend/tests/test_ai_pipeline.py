@@ -5,9 +5,25 @@ import numpy as np
 
 from app.ai_pipeline.embedding import EmbeddingService
 from app.ai_pipeline.clustering import ClusteringService
-from app.ai_pipeline.summarizer import SummarizerService
+from app.ai_pipeline.summarizer import SummarizerService, normalize_category
 from app.ai_pipeline.pipeline import AIPipeline
 from app.models.models import Article, HotEvent, EventArticle
+
+
+class TestCategoryNormalization:
+    def test_allowed_categories_pass_through(self):
+        for c in ("tech", "finance", "social", "global", "sports", "entertainment", "health", "other"):
+            assert normalize_category(c) == c
+
+    def test_aliases_are_mapped(self):
+        assert normalize_category("sports-other") == "sports"
+        assert normalize_category("Sport") == "sports"
+        assert normalize_category("movie") == "entertainment"
+
+    def test_unknown_and_empty_fall_back_to_other(self):
+        assert normalize_category("politics") == "other"
+        assert normalize_category(None) == "other"
+        assert normalize_category("") == "other"
 
 
 class TestEmbeddingService:
@@ -63,6 +79,15 @@ class TestEmbeddingService:
 
 
 class TestClusteringService:
+    def test_pipeline_uses_tuned_dbscan_parameters(self):
+        with patch("app.ai_pipeline.pipeline.EmbeddingService"), patch(
+            "app.ai_pipeline.pipeline.SummarizerService"
+        ):
+            pipeline = AIPipeline(MagicMock())
+
+        assert pipeline.clustering.eps == 0.20
+        assert pipeline.clustering.min_samples == 2
+
     def test_cluster_basic(self):
         embeddings = [
             [1.0, 0.0, 0.0],

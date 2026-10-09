@@ -1,5 +1,5 @@
 import { useEffect, useRef, useCallback } from 'react';
-import { globalMutate } from '@/hooks/useApi';
+import { globalMutate, withReadToken } from '@/hooks/useApi';
 
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:51180/api/v1';
 
@@ -21,7 +21,9 @@ export function useSSE(url: string, options: UseSSEOptions = {}) {
     }
 
     try {
-      const fullUrl = url.startsWith('http') ? url : `${API_BASE}${url}`;
+      const rawUrl = url.startsWith('http') ? url : `${API_BASE}${url}`;
+      // EventSource 带不了 header，读令牌走 query
+      const fullUrl = withReadToken(rawUrl);
       const es = new EventSource(fullUrl);
       eventSourceRef.current = es;
 

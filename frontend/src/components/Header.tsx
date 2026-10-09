@@ -31,7 +31,7 @@ export default function Header() {
           <ThemeToggle />
           <Link
             to="/admin"
-            className="hidden text-sm font-medium text-muted-foreground transition-colors hover:text-foreground sm:block"
+            className="text-sm font-medium text-muted-foreground transition-colors hover:text-foreground"
           >
             管理
           </Link>

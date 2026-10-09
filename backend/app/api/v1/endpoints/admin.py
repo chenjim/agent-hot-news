@@ -1,9 +1,12 @@
 import asyncio
 from collections import deque
 from datetime import datetime, timedelta, timezone
+from itertools import count
 from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from app.core.auth import require_read, require_write
+from app.core.system_meta import get_first_started_at, init_first_started_at
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 from loguru import logger
@@ -20,15 +23,16 @@ from app.utils.timezone import get_tz
 
 router = APIRouter()
 
-# In-memory task execution logs (later can be moved to database)
+# In-Memory task execution logs (later can be moved to database)
 _MAX_LOGS = 1000
 _TASK_LOGS: deque[dict] = deque(maxlen=_MAX_LOGS)
+_log_ids = count(1)
 _SERVER_START_TIME = datetime.now(timezone.utc)
 
 
 def _append_log(task_name: str, status: str, message: str = ""):
     entry = {
-        "id": str(len(_TASK_LOGS) + 1),
+        "id": str(next(_log_ids)),
         "task": task_name,
         "status": "success" if status == "success" else "failed",
         "message": message,
@@ -37,7 +41,7 @@ def _append_log(task_name: str, status: str, message: str = ""):
     _TASK_LOGS.append(entry)
 
 
-@router.get("/stats")
+@router.get("/stats", dependencies=[Depends(require_read)])
 def get_admin_stats(db: Session = Depends(get_db), tz: str = Query("Asia/Shanghai")):
     """System statistics dashboard."""
     today_start = datetime.now(get_tz(tz)).replace(hour=0, minute=0, second=0, microsecond=0)
@@ -85,9 +89,24 @@ def get_admin_stats(db: Session = Depends(get_db), tz: str = Query("Asia/Shangha
             "fetched_today": fetched_today,
         })
 
-    uptime_seconds = int((datetime.now(timezone.utc) - _SERVER_START_TIME).total_seconds())
+    # 累计运行时间：从系统首次上线算起（跨重启持久化），不是本次进程启动到现在。
+    # 首次调用时才 seed 一次，起点取「本次进程启动」与「库里最早业务记录」中更早的那个。
+    first_started_at = get_first_started_at()
+    if first_started_at is None:
+        candidates = [_SERVER_START_TIME]
+        for column in (HotEvent.first_seen_at, Article.fetched_at):
+            earliest = db.query(func.min(column)).scalar()
+            if earliest is not None:
+                candidates.append(
+                    earliest if earliest.tzinfo else earliest.replace(tzinfo=timezone.utc)
+                )
+        first_started_at = init_first_started_at(min(candidates))
+
+    now_utc = datetime.now(timezone.utc)
+    uptime_seconds = max(int((now_utc - first_started_at).total_seconds()), 0)
 
     return {
+        "first_started_at": first_started_at.isoformat(),
         "articles_today": articles_today,
         "events_today": hot_events_today,
         "total_articles": total_articles,
@@ -100,7 +119,7 @@ def get_admin_stats(db: Session = Depends(get_db), tz: str = Query("Asia/Shangha
     }
 
 
-@router.post("/trigger-fetch")
+@router.post("/trigger-fetch", dependencies=[Depends(require_write)])
 async def trigger_fetch():
     """Manually trigger the article fetch task."""
     last_fetch = get_last_fetch_time()
@@ -122,7 +141,7 @@ async def trigger_fetch():
         raise HTTPException(status_code=500, detail="Fetch task failed")
 
 
-@router.post("/trigger-ai")
+@router.post("/trigger-ai", dependencies=[Depends(require_write)])
 async def trigger_ai():
     """Manually trigger the AI processing task."""
     last_ai = get_last_ai_time()
@@ -144,7 +163,7 @@ async def trigger_ai():
         raise HTTPException(status_code=500, detail="AI process task failed")
 
 
-@router.get("/logs")
+@router.get("/logs", dependencies=[Depends(require_read)])
 def get_logs(limit: int = 100) -> List[dict]:
     """Get recent task execution logs."""
     if limit < 1:

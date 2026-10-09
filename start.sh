@@ -3,6 +3,12 @@ set -e
 
 cd "$(dirname "$0")"
 
+# cookie 文件住在 backend/（随 ./backend:/app 进容器），缺失就建空文件占位
+for _ck in weibo baidu zhihu toutiao; do
+    [ -f "backend/cookie.${_ck}.txt" ] || { touch "backend/cookie.${_ck}.txt"; echo "[INFO] Created empty placeholder backend/cookie.${_ck}.txt"; }
+done
+unset _ck
+
 echo "=========================================="
 echo "   Agent Hot News - 启动 / 重启"
 echo "=========================================="

@@ -12,14 +12,19 @@ class TestHotEventsAPI:
 
     def test_list_hot_events_with_data(self, client, db):
         now = datetime.now(timezone.utc)
-        # Use distinct first_seen_at to guarantee ordering
+        # 列表按 aggregated_at 倒序（与卡片展示字段一致）。
+        # 故意让 last_updated_at 与 aggregated_at 顺序相反：e2 最后更新、但 e1
+        # 更早聚合，断言顺序必须由 aggregated_at 决定 —— 回退到 last_updated_at 会挂。
         e1 = HotEvent(
             title="Event 1", summary="S1", category="tech", hot_score=100.0,
-            first_seen_at=now, last_updated_at=now,
+            first_seen_at=now - timedelta(hours=3),
+            last_updated_at=now - timedelta(hours=1),
+            aggregated_at=now,
         )
         e2 = HotEvent(
             title="Event 2", summary="S2", category="finance", hot_score=50.0,
-            first_seen_at=now - timedelta(hours=1), last_updated_at=now,
+            first_seen_at=now, last_updated_at=now,
+            aggregated_at=now - timedelta(hours=2),
         )
         db.add_all([e1, e2])
         db.commit()
@@ -31,10 +36,40 @@ class TestHotEventsAPI:
         assert data[0]["title"] == "Event 1"
         assert data[1]["title"] == "Event 2"
 
+    def test_list_excludes_unpublished_events(self, client, db):
+        # 未达标（aggregated_at 为空）的事件不上列表 —— 即使 last_updated_at 很新
+        now = datetime.now(timezone.utc)
+        cat = "__unpublished_test__"
+        db.add(HotEvent(
+            title="Unpublished", summary="S", category=cat, hot_score=10.0,
+            last_updated_at=now, aggregated_at=None,
+        ))
+        db.add(HotEvent(
+            title="Published", summary="S", category=cat, hot_score=10.0,
+            last_updated_at=now - timedelta(hours=5), aggregated_at=now,
+        ))
+        db.commit()
+
+        data = client.get(f"/api/v1/hot-events?category={cat}").json()
+        assert [e["title"] for e in data] == ["Published"]
+        assert data[0]["aggregated_at"] is not None
+
+    def test_list_excludes_events_outside_aggregation_window(self, client, db):
+        # 7 天窗口按 aggregated_at 算：7 天前聚合、今天刚更新的事件不展示
+        now = datetime.now(timezone.utc)
+        cat = "__stale_aggregate_test__"
+        db.add(HotEvent(
+            title="Old Aggregate", summary="S", category=cat, hot_score=10.0,
+            last_updated_at=now, aggregated_at=now - timedelta(days=8),
+        ))
+        db.commit()
+
+        assert client.get(f"/api/v1/hot-events?category={cat}").json() == []
+
     def test_list_hot_events_filter_category(self, client, db):
         now = datetime.now(timezone.utc)
-        e1 = HotEvent(title="Tech News", summary="S1", category="tech", hot_score=10.0, last_updated_at=now)
-        e2 = HotEvent(title="Finance News", summary="S2", category="finance", hot_score=20.0, last_updated_at=now)
+        e1 = HotEvent(title="Tech News", summary="S1", category="tech", hot_score=10.0, last_updated_at=now, aggregated_at=now)
+        e2 = HotEvent(title="Finance News", summary="S2", category="finance", hot_score=20.0, last_updated_at=now, aggregated_at=now)
         db.add_all([e1, e2])
         db.commit()
 
@@ -43,6 +78,30 @@ class TestHotEventsAPI:
         data = response.json()
         assert len(data) == 1
         assert data[0]["title"] == "Tech News"
+
+    def test_list_hot_events_offset_pagination(self, client, db):
+        now = datetime.now(timezone.utc)
+        # 唯一分类名避开其它用例的缓存；aggregated_at 依次递减决定顺序
+        cat = "__offset_test__"
+        for i in range(5):
+            db.add(HotEvent(
+                title=f"Offset {i}", summary="S", category=cat,
+                hot_score=float(i), last_updated_at=now,
+                aggregated_at=now - timedelta(minutes=i),
+            ))
+        db.commit()
+
+        page1 = client.get(f"/api/v1/hot-events?category={cat}&limit=2").json()
+        page2 = client.get(f"/api/v1/hot-events?category={cat}&limit=2&offset=2").json()
+        page3 = client.get(f"/api/v1/hot-events?category={cat}&limit=2&offset=4").json()
+
+        assert [e["title"] for e in page1] == ["Offset 0", "Offset 1"]
+        assert [e["title"] for e in page2] == ["Offset 2", "Offset 3"]
+        assert [e["title"] for e in page3] == ["Offset 4"]
+
+    def test_list_hot_events_limit_cap(self, client):
+        assert client.get("/api/v1/hot-events?limit=300").status_code == 200
+        assert client.get("/api/v1/hot-events?limit=301").status_code == 422
 
     def test_get_hot_event_detail(self, client, db):
         now = datetime.now(timezone.utc)
@@ -176,3 +235,17 @@ class TestHealthAPI:
         response = client.get("/health")
         assert response.status_code == 200
         assert response.json() == {"status": "ok"}
+
+
+class TestAdminTaskLogs:
+    def test_log_ids_stay_unique_after_rotation(self, client):
+        from app.api.v1.endpoints import admin
+
+        admin._TASK_LOGS.clear()
+        for _ in range(admin._MAX_LOGS + 5):
+            admin._append_log("test-task", "success")
+
+        ids = [int(entry["id"]) for entry in admin._TASK_LOGS]
+        assert len(admin._TASK_LOGS) == admin._MAX_LOGS
+        assert len(ids) == len(set(ids))
+        assert ids == sorted(ids)

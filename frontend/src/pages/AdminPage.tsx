@@ -1,62 +1,29 @@
 import AdminLayout from '@/components/admin/AdminLayout';
 import StatsCards from '@/components/admin/StatsCards';
 import SourceTable from '@/components/admin/SourceTable';
-import TaskControl from '@/components/admin/TaskControl';
-import {
-  useAdminStats,
-  useSources,
-  useTaskLogs,
-  createSource,
-  triggerFetch,
-  triggerAI,
-  triggerSourceFetch,
-} from '@/hooks/useApi';
+import TaskLogTable from '@/components/admin/TaskLogTable';
+import { useAdminStats, useTaskLogs } from '@/hooks/useApi';
 
+/**
+ * 只读看板：统计 / 来源状态 / 任务日志。
+ * 写操作（增删改来源、手动触发采集与 AI 处理）已从页面移除；
+ * 后端写接口保留，需带 X-Write-Token 调用，见 docs/api.md。
+ */
 export default function AdminPage() {
-  const { stats, isLoading: statsLoading, mutate: mutateStats } = useAdminStats();
-  const { logs, isLoading: logsLoading, mutate: mutateLogs } = useTaskLogs();
+  const { stats, isLoading: statsLoading } = useAdminStats();
+  const { logs, isLoading: logsLoading } = useTaskLogs();
 
   // 使用 stats.sources_health 代替 useSources()，因为它包含 fetched_today
   const sources = stats?.sources_health || [];
-
-  const handleCreate = async (data: Parameters<typeof createSource>[0]) => {
-    await createSource(data);
-    await mutateStats();
-  };
-
-  const handleTriggerSourceFetch = async (id: number) => {
-    await triggerSourceFetch(id);
-    await mutateStats();
-  };
-
-  const handleTriggerFetch = async () => {
-    await triggerFetch();
-    await mutateLogs();
-  };
-
-  const handleTriggerAI = async () => {
-    await triggerAI();
-    await mutateLogs();
-  };
 
   return (
     <AdminLayout>
       <div className="space-y-8">
         <StatsCards stats={stats} isLoading={statsLoading} />
 
-        <SourceTable
-          sources={sources}
-          isLoading={statsLoading}
-          onCreate={handleCreate}
-          onTriggerFetch={handleTriggerSourceFetch}
-        />
+        <SourceTable sources={sources} isLoading={statsLoading} />
 
-        <TaskControl
-          logs={logs}
-          isLoading={logsLoading}
-          onTriggerFetch={handleTriggerFetch}
-          onTriggerAI={handleTriggerAI}
-        />
+        <TaskLogTable logs={logs} isLoading={logsLoading} />
       </div>
     </AdminLayout>
   );

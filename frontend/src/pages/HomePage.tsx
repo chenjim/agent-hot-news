@@ -1,17 +1,39 @@
-import { useState, useCallback } from 'react';
-import { Flame, RefreshCw } from 'lucide-react';
+import { useState, useCallback, useEffect, useRef } from 'react';
+import { Flame, Loader2 } from 'lucide-react';
 import Header from '@/components/Header';
 import CategoryFilter from '@/components/CategoryFilter';
 import HotEventCard from '@/components/HotEventCard';
 import ToastNotification, { pushToast } from '@/components/ToastNotification';
-import { useHotEvents } from '@/hooks/useApi';
+import { useHotEventsInfinite } from '@/hooks/useApi';
 import { useHotEventsSSE } from '@/hooks/useSSE';
 import { type Category } from '@/types';
-import { cn } from '@/lib/utils';
 
 export default function HomePage() {
   const [category, setCategory] = useState<Category>('all');
-  const { events, error, isLoading, mutate } = useHotEvents(category, 30);
+  const { events, error, isLoading, isReachingEnd, loadMore, setSize } =
+    useHotEventsInfinite(category, 30);
+
+  // 切分类时回到第一页，否则会沿用上一个分类已加载的页数
+  useEffect(() => {
+    setSize(1);
+  }, [category, setSize]);
+
+  const sentinelRef = useRef<HTMLDivElement | null>(null);
+
+  // 触底自动加载下一页：observer 依赖 loadMore，每加载一页重建一次；
+  // 哨兵若仍在视口内会再次触发，直到加载完或哨兵移出视口。
+  useEffect(() => {
+    const el = sentinelRef.current;
+    if (!el) return;
+    const io = new IntersectionObserver(
+      (entries) => {
+        if (entries[0]?.isIntersecting) loadMore();
+      },
+      { rootMargin: '400px' }
+    );
+    io.observe(el);
+    return () => io.disconnect();
+  }, [loadMore]);
 
   const handleSSEMessage = useCallback((data: unknown) => {
     if (data && typeof data === 'object' && 'event' in data) {
@@ -37,17 +59,6 @@ export default function HomePage() {
                 AI 实时聚合 {events.length} 个正在发酵的热点事件
               </p>
             </div>
-            <button
-              onClick={() => mutate()}
-              className={cn(
-                'flex items-center gap-2 rounded-full border border-border bg-card px-4 py-2 text-sm font-medium',
-                'transition-all hover:bg-secondary',
-                isLoading && 'animate-pulse'
-              )}
-            >
-              <RefreshCw className={cn('h-4 w-4', isLoading && 'animate-spin')} />
-              刷新
-            </button>
           </div>
         </section>
 
@@ -77,11 +88,25 @@ export default function HomePage() {
             <p className="text-sm">数据采集和 AI 分析正在后台运行...</p>
           </div>
         ) : (
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {events.map((event, index) => (
-              <HotEventCard key={event.id} event={event} index={index} />
-            ))}
-          </div>
+          <>
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              {events.map((event, index) => (
+                <HotEventCard key={event.id} event={event} index={index} />
+              ))}
+            </div>
+
+            {/* 触底哨兵：进入视口即自动加载下一页 */}
+            <div
+              ref={sentinelRef}
+              className="flex items-center justify-center py-8 text-sm text-muted-foreground"
+            >
+              {isReachingEnd ? (
+                <span>已经到底啦</span>
+              ) : (
+                <Loader2 className="h-5 w-5 animate-spin" />
+              )}
+            </div>
+          </>
         )}
       </main>
 

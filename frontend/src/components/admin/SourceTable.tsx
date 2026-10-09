@@ -1,14 +1,10 @@
-import { useState } from 'react';
-import { Plus, Play, AlertCircle, CheckCircle2, PauseCircle } from 'lucide-react';
-import type { Source, SourceFormData } from '@/types';
+import { AlertCircle, CheckCircle2, PauseCircle } from 'lucide-react';
+import type { SourceHealth } from '@/types';
 import { cn, formatRelativeTime } from '@/lib/utils';
-import SourceFormModal from './SourceFormModal';
 
 interface SourceTableProps {
-  sources: Source[];
+  sources: SourceHealth[];
   isLoading: boolean;
-  onCreate: (data: SourceFormData) => Promise<void>;
-  onTriggerFetch: (id: number) => Promise<void>;
 }
 
 function StatusBadge({ status }: { status: string }) {
@@ -28,46 +24,13 @@ function StatusBadge({ status }: { status: string }) {
   );
 }
 
-export default function SourceTable({
-  sources,
-  isLoading,
-  onCreate,
-  onTriggerFetch,
-}: SourceTableProps) {
-  const [modalOpen, setModalOpen] = useState(false);
-  const [actionLoading, setActionLoading] = useState<number | null>(null);
-
-  const handleCreate = () => {
-    setModalOpen(true);
-  };
-
-  const handleSubmit = async (data: SourceFormData) => {
-    await onCreate(data);
-  };
-
-  const handleTrigger = async (id: number) => {
-    setActionLoading(id);
-    try {
-      await onTriggerFetch(id);
-    } finally {
-      setActionLoading(null);
-    }
-  };
-
+/** 来源状态一览（只读）。增删改与手动采集走后端写接口，页面不再提供入口。 */
+export default function SourceTable({ sources, isLoading }: SourceTableProps) {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h2 className="text-lg font-bold">来源管理</h2>
-        <button
-          onClick={handleCreate}
-          className={cn(
-            'flex items-center gap-1.5 rounded-lg bg-primary px-3 py-2 text-sm font-medium text-primary-foreground',
-            'hover:bg-primary/90'
-          )}
-        >
-          <Plus className="h-4 w-4" />
-          添加来源
-        </button>
+        <h2 className="text-lg font-bold">来源状态</h2>
+        <span className="text-xs text-muted-foreground">只读</span>
       </div>
 
       <div className="overflow-hidden rounded-xl border border-border bg-card">
@@ -78,7 +41,7 @@ export default function SourceTable({
                 <th className="px-4 py-3 text-left font-medium">名称</th>
                 <th className="px-4 py-3 text-left font-medium">状态</th>
                 <th className="px-4 py-3 text-left font-medium">最后采集</th>
-                <th className="px-4 py-3 text-right font-medium">操作</th>
+                <th className="px-4 py-3 text-left font-medium">最近错误</th>
               </tr>
             </thead>
             <tbody>
@@ -98,10 +61,13 @@ export default function SourceTable({
                 </tr>
               ) : (
                 sources.map((source) => (
-                  <tr key={source.id} className="border-b border-border last:border-0 transition-colors hover:bg-muted/30">
+                  <tr
+                    key={source.name}
+                    className="border-b border-border last:border-0 transition-colors hover:bg-muted/30"
+                  >
                     <td className="px-4 py-3 font-medium">{source.name}</td>
                     <td className="px-4 py-3">
-                      <StatusBadge status={source.status} />
+                      <StatusBadge status={source.status || 'paused'} />
                     </td>
                     <td className="px-4 py-3">
                       <span className="text-muted-foreground">
@@ -113,17 +79,8 @@ export default function SourceTable({
                         </span>
                       )}
                     </td>
-                    <td className="px-4 py-3">
-                      <div className="flex items-center justify-end gap-1">
-                        <button
-                          onClick={() => handleTrigger(source.id)}
-                          disabled={actionLoading === source.id}
-                          title="手动采集"
-                          className="rounded p-1.5 text-muted-foreground hover:bg-secondary hover:text-foreground disabled:opacity-50"
-                        >
-                          <Play className="h-4 w-4" />
-                        </button>
-                      </div>
+                    <td className="max-w-xs truncate px-4 py-3 text-xs text-muted-foreground">
+                      {source.last_error || '—'}
                     </td>
                   </tr>
                 ))
@@ -132,12 +89,6 @@ export default function SourceTable({
           </table>
         </div>
       </div>
-
-      <SourceFormModal
-        isOpen={modalOpen}
-        onClose={() => setModalOpen(false)}
-        onSubmit={handleSubmit}
-      />
     </div>
   );
 }

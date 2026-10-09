@@ -17,6 +17,8 @@ class HotEventListItem(BaseModel):
     sources_count: int
     first_seen_at: Optional[datetime] = None
     last_updated_at: Optional[datetime] = None
+    # 聚合发布时间：达标瞬间写入、永不更新；列表排序与卡片时间都用它
+    aggregated_at: Optional[datetime] = None
     cover_image: Optional[str] = None
 
     class Config:
@@ -34,7 +36,8 @@ class SourceItem(BaseModel):
     url: str
     title: str
     hot_score: float
-    content: Optional[str] = None
+    # 该链接能否在浏览器里打开：false 时前端用标题做搜索兜底
+    browsable: bool = False
 
 
 class HotEventDetail(HotEventListItem):

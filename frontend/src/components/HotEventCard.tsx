@@ -19,8 +19,8 @@ function TrendIcon({ trend, className }: { trend: string; className?: string }) 
   return <Flame className={cn(sizeClass, className)} />;
 }
 
-export default function HotEventCard({ event, index }: HotEventCardProps) {
-  const today = isToday(event.first_seen_at);
+export default function HotEventCard({ event }: HotEventCardProps) {
+  const today = isToday(event.aggregated_at);
 
   return (
     <Link
@@ -67,9 +67,10 @@ export default function HotEventCard({ event, index }: HotEventCardProps) {
             <span>{event.sources_count} 个来源</span>
           </div>
 
-          {/* Time */}
+          {/* Time —— 必须与列表排序字段（aggregated_at desc）一致，否则卡片时间看起来乱序。
+              该时间是「凑满 3 篇且跨 2 源」的聚合时刻，之后永不更新，老事件不会跳回头条 */}
           <span className="ml-auto text-muted-foreground">
-            {formatRelativeTime(event.last_updated_at)}
+            {formatRelativeTime(event.aggregated_at ?? event.last_updated_at)}
           </span>
         </div>
 

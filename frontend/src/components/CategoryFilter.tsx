@@ -6,7 +6,17 @@ interface CategoryFilterProps {
   onChange: (c: Category) => void;
 }
 
-const categories: Category[] = ['all', 'tech', 'finance', 'social', 'global', 'other'];
+const categories: Category[] = [
+  'all',
+  'tech',
+  'finance',
+  'social',
+  'global',
+  'sports',
+  'entertainment',
+  'health',
+  'other',
+];
 
 export default function CategoryFilter({ active, onChange }: CategoryFilterProps) {
   return (

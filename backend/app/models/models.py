@@ -38,6 +38,9 @@ class Article(Base):
     language = Column(String(10), default="zh")
     embedding = Column(VectorType(_EMBEDDING_DIM))  # pgvector on PG, JSON fallback on SQLite
     is_processed = Column(Boolean, default=False)
+    # 归属判定重试计数：outlier 未被任何事件收编时每轮 +1，
+    # 达到 ROUTE_MAX_ATTEMPTS 才置 is_processed=True（待定池老化，方案 C）
+    route_attempts = Column(Integer, default=0, nullable=False)
 
     event_articles = relationship("EventArticle", back_populates="article")
 
@@ -57,7 +60,11 @@ class HotEvent(Base):
     articles_count = Column(Integer, default=0)
     sources_count = Column(Integer, default=0)
     first_seen_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    # 内部字段：每次并入文章都会刷新，只供 7 天召回窗口与过期清理使用，不参与展示排序
     last_updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+    # 聚合发布时间：文章数首次达到 MIN_PUBLISH_ARTICLES（且来源 ≥ MIN_EVENT_SOURCES）时写入，
+    # 之后永不更新 —— 故意不设 default/onupdate，首页卡片时间与列表排序都用它
+    aggregated_at = Column(DateTime(timezone=True), index=True)
     cover_image = Column(String(2048))
     embedding_centroid = Column(VectorType(_EMBEDDING_DIM))
 

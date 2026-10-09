@@ -1,13 +1,10 @@
-import { useState } from 'react';
-import { Zap, Brain, Activity, CheckCircle2, XCircle, Loader2 } from 'lucide-react';
+import { Activity, CheckCircle2, XCircle, Loader2 } from 'lucide-react';
 import type { TaskLog } from '@/types';
-import { cn, formatRelativeTime } from '@/lib/utils';
+import { formatRelativeTime } from '@/lib/utils';
 
-interface TaskControlProps {
+interface TaskLogTableProps {
   logs: TaskLog[];
   isLoading: boolean;
-  onTriggerFetch: () => Promise<void>;
-  onTriggerAI: () => Promise<void>;
 }
 
 function StatusIcon({ status }: { status: string }) {
@@ -16,55 +13,13 @@ function StatusIcon({ status }: { status: string }) {
   return <XCircle className="h-4 w-4 text-red-500" />;
 }
 
-export default function TaskControl({ logs, isLoading, onTriggerFetch, onTriggerAI }: TaskControlProps) {
-  const [fetchLoading, setFetchLoading] = useState(false);
-  const [aiLoading, setAiLoading] = useState(false);
-
-  const handleFetch = async () => {
-    setFetchLoading(true);
-    try {
-      await onTriggerFetch();
-    } finally {
-      setFetchLoading(false);
-    }
-  };
-
-  const handleAI = async () => {
-    setAiLoading(true);
-    try {
-      await onTriggerAI();
-    } finally {
-      setAiLoading(false);
-    }
-  };
-
+/** 最近任务日志（只读）。触发按钮已移除，任务由调度器与后端写接口驱动。 */
+export default function TaskLogTable({ logs, isLoading }: TaskLogTableProps) {
   return (
     <div className="space-y-4">
-      <h2 className="text-lg font-bold">任务控制</h2>
-
-      <div className="flex flex-wrap gap-3">
-        <button
-          onClick={handleFetch}
-          disabled={fetchLoading}
-          className={cn(
-            'flex items-center gap-2 rounded-lg bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground',
-            'hover:bg-primary/90 disabled:opacity-50'
-          )}
-        >
-          <Zap className={cn('h-4 w-4', fetchLoading && 'animate-pulse')} />
-          {fetchLoading ? '采集中...' : '立即采集'}
-        </button>
-        <button
-          onClick={handleAI}
-          disabled={aiLoading}
-          className={cn(
-            'flex items-center gap-2 rounded-lg border border-border bg-card px-4 py-2.5 text-sm font-medium',
-            'hover:bg-secondary disabled:opacity-50'
-          )}
-        >
-          <Brain className={cn('h-4 w-4', aiLoading && 'animate-pulse')} />
-          {aiLoading ? '处理中...' : '立即 AI 处理'}
-        </button>
+      <div className="flex items-center justify-between">
+        <h2 className="text-lg font-bold">任务日志</h2>
+        <span className="text-xs text-muted-foreground">只读</span>
       </div>
 
       <div>
@@ -100,7 +55,10 @@ export default function TaskControl({ logs, isLoading, onTriggerFetch, onTrigger
                   </tr>
                 ) : (
                   logs.map((log) => (
-                    <tr key={log.id} className="border-b border-border last:border-0 transition-colors hover:bg-muted/30">
+                    <tr
+                      key={log.id}
+                      className="border-b border-border last:border-0 transition-colors hover:bg-muted/30"
+                    >
                       <td className="px-4 py-3 font-medium">{log.task}</td>
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-1.5">
@@ -108,7 +66,9 @@ export default function TaskControl({ logs, isLoading, onTriggerFetch, onTrigger
                           <span className="text-xs capitalize">{log.status}</span>
                         </div>
                       </td>
-                      <td className="max-w-xs truncate px-4 py-3 text-muted-foreground">{log.message}</td>
+                      <td className="max-w-xs truncate px-4 py-3 text-muted-foreground">
+                        {log.message}
+                      </td>
                       <td className="px-4 py-3 text-right text-muted-foreground">
                         {formatRelativeTime(log.created_at)}
                       </td>

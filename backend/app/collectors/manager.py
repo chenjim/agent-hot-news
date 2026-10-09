@@ -119,7 +119,53 @@ class CollectorManager:
         self.db.commit()
         return all_articles
 
-    def save_articles(self, raw_articles: List[RawArticle]) -> int:
+    def load_existing(self, raw_articles: List[RawArticle]):
+        """取出本批中「已在库」的文章索引，供摘要前去重与 save_articles 共用。
+
+        返回 ``(existing_by_url, existing_by_source_title)``，判定口径与
+        ``save_articles`` 完全一致：URL 精确匹配，或（来源名 + 标题）匹配。
+        摘要前用它跳过已在库的条目，避免每轮采集重复过 LLM。
+        """
+        if not raw_articles:
+            return {}, {}
+
+        urls = {raw.url for raw in raw_articles}
+        existing_by_url = {
+            a.url: a
+            for a in self.db.query(Article).filter(Article.url.in_(urls)).all()
+        }
+
+        # Also query existing articles by (source_name, title) to catch
+        # duplicates that arrived under different URLs.
+        from sqlalchemy import or_, and_
+
+        pairs = {(raw.source_name, raw.title) for raw in raw_articles}
+        conditions = [
+            and_(Article.source_name == sn, Article.title == t) for sn, t in pairs
+        ]
+        existing_by_source_title = {
+            (a.source_name, a.title): a
+            for a in self.db.query(Article).filter(or_(*conditions)).all()
+        }
+        return existing_by_url, existing_by_source_title
+
+    @staticmethod
+    def known_predicate(existing_by_url, existing_by_source_title):
+        """把 ``load_existing`` 的结果包成 ``raw -> bool`` 谓词（该条目是否已在库）。"""
+
+        def _is_known(raw: RawArticle) -> bool:
+            return (
+                raw.url in existing_by_url
+                or (raw.source_name, raw.title) in existing_by_source_title
+            )
+
+        return _is_known
+
+    def save_articles(
+        self,
+        raw_articles: List[RawArticle],
+        existing=None,
+    ) -> int:
         """Save new articles and update timestamps for existing ones.
 
         Deduplication is performed on two levels:
@@ -131,36 +177,21 @@ class CollectorManager:
         For existing articles, updates ``fetched_at``, ``raw_hot_score`` and
         back-fills ``published_at`` when missing.
 
+        ``existing`` 可选：``load_existing`` 的返回值。摘要前去重已经查过一次时传进来，
+        避免重复构建同一批 OR 条件。不传则自行查询（兼容旧调用）。
+
         Returns the number of newly created articles.
         """
         seen_urls = set()
         seen_source_titles = set()
         new_count = 0
 
-        urls = [raw.url for raw in raw_articles]
-        existing_by_url = {
-            a.url: a
-            for a in self.db.query(Article).filter(Article.url.in_(urls)).all()
-        }
-
-        # Also query existing articles by (source_name, title) to catch
-        # duplicates that arrived under different URLs.
-        source_name_title_pairs = [
-            (raw.source_name, raw.title) for raw in raw_articles
-        ]
-        if source_name_title_pairs:
-            # Build OR conditions for (source_name, title) pairs
-            from sqlalchemy import or_, and_
-            conditions = [
-                and_(Article.source_name == sn, Article.title == t)
-                for sn, t in source_name_title_pairs
-            ]
-            existing_by_source_title = {
-                (a.source_name, a.title): a
-                for a in self.db.query(Article).filter(or_(*conditions)).all()
-            }
+        if existing is None:
+            existing_by_url, existing_by_source_title = self.load_existing(
+                raw_articles
+            )
         else:
-            existing_by_source_title = {}
+            existing_by_url, existing_by_source_title = existing
 
         for raw in raw_articles:
             # 1. Deduplicate within the same batch by URL
@@ -193,11 +224,18 @@ class CollectorManager:
                 continue
 
             # 5. Truly new article
+            # 落库层硬约束：原文（content）永不入库。上游 ArticleSummarizer 应已把
+            # 原文换成 LLM 摘要；若仍有 content 说明调用方漏了处理，这里丢弃并告警。
+            if raw.content:
+                logger.warning(
+                    f"落库时发现未摘要的原文，已丢弃 content: [{raw.source_name}] "
+                    f"{raw.title[:60]}"
+                )
             article = Article(
                 url=raw.url,
                 title=raw.title,
                 summary=raw.summary,
-                content=raw.content,
+                content=None,
                 source_name=raw.source_name,
                 source_url=raw.source_url,
                 published_at=raw.published_at,

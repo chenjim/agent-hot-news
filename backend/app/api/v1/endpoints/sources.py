@@ -1,5 +1,6 @@
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException
+from app.core.auth import require_read, require_write
 from sqlalchemy.orm import Session
 from typing import List
 
@@ -10,7 +11,7 @@ from app.schemas.source import SourceCreate, SourceRead, SourceUpdate
 router = APIRouter()
 
 
-@router.get("", response_model=List[SourceRead])
+@router.get("", response_model=List[SourceRead], dependencies=[Depends(require_read)])
 def list_sources(
     status: SourceStatus = None,
     db: Session = Depends(get_db),
@@ -21,7 +22,7 @@ def list_sources(
     return query.order_by(Source.created_at.desc()).all()
 
 
-@router.post("", response_model=SourceRead)
+@router.post("", response_model=SourceRead, dependencies=[Depends(require_write)])
 def create_source(
     source_in: SourceCreate,
     db: Session = Depends(get_db),
@@ -33,7 +34,7 @@ def create_source(
     return source
 
 
-@router.get("/{source_id}", response_model=SourceRead)
+@router.get("/{source_id}", response_model=SourceRead, dependencies=[Depends(require_read)])
 def get_source(
     source_id: int,
     db: Session = Depends(get_db),
@@ -44,7 +45,7 @@ def get_source(
     return source
 
 
-@router.put("/{source_id}", response_model=SourceRead)
+@router.put("/{source_id}", response_model=SourceRead, dependencies=[Depends(require_write)])
 def update_source(
     source_id: int,
     source_in: SourceUpdate,
@@ -62,7 +63,7 @@ def update_source(
     return source
 
 
-@router.delete("/{source_id}")
+@router.delete("/{source_id}", dependencies=[Depends(require_write)])
 def delete_source(
     source_id: int,
     db: Session = Depends(get_db),
@@ -75,7 +76,7 @@ def delete_source(
     return {"ok": True}
 
 
-@router.post("/{source_id}/fetch")
+@router.post("/{source_id}/fetch", dependencies=[Depends(require_write)])
 async def trigger_source_fetch(
     source_id: int,
     db: Session = Depends(get_db),
@@ -94,7 +95,15 @@ async def trigger_source_fetch(
         collector = manager.create_collector(source)
         articles = await collector.fetch()
 
-        new_count = manager.save_articles(articles)
+        # 原文不入库：先把带原文的条目交给 LLM 做摘要，失败的跳过。
+        # 摘要前先去重，已在库的条目不再重复过 LLM（省 token）。
+        from app.ai_pipeline.article_summarizer import ArticleSummarizer
+
+        existing = manager.load_existing(articles)
+        articles = await ArticleSummarizer().process(
+            articles, is_known=manager.known_predicate(*existing)
+        )
+        new_count = manager.save_articles(articles, existing=existing)
 
         # Update source timestamp
         source.last_fetched_at = datetime.now(timezone.utc)

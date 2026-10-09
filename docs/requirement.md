@@ -110,7 +110,7 @@
 #### 3.3.1 热点列表 API
 ```
 GET /api/hot-events
-Query: ?category=all|tech|finance|social|global&limit=20&timeframe=24h
+Query: ?category=all|tech|finance|social|global|sports|entertainment|health|other&limit=30&offset=0
 Response:
 [
   {
@@ -124,6 +124,7 @@ Response:
     "articles_count": 35,   // 相关文章数
     "first_seen_at": "2026-04-28T02:00:00Z",
     "last_updated_at": "2026-04-28T18:00:00Z",
+    "aggregated_at": "2026-04-28T03:15:00Z",  // 聚合发布时间：满3篇+2源的瞬间写入，之后不再变；列表按它倒序
     "entities": ["OpenAI", "GPT-5", "Sam Altman"],
     "sentiment": "positive",
     "cover_image": "https://..."  // 可选：话题封面图
@@ -175,12 +176,12 @@ DELETE /api/sources/:id   # 停用来源
 - 核心区域：**TOP 热点卡片流**，按热度排序
   - 每张卡片：话题标题、一句话摘要、热度分、来源数、趋势箭头
   - 点击展开详情侧栏 / 跳转详情页
-- 侧边/底部：分类筛选标签（全部 / 科技 / 财经 / 国际 / 社会）
+- 侧边/底部：分类筛选标签（全部 / 科技 / 财经 / 社会 / 国际 / 体育 / 娱乐 / 健康 / 其他）
+- 无限滚动：首屏 30 条，滑到底部自动加载下一页，最多 10 页（300 条）
 - 可选：热度趋势迷你图（24h 内的热度变化曲线）
 
 **详情页 — 事件深挖**
 - 话题标题 + AI 生成摘要
-- **传播时间线**：各来源报道的先后顺序
 - **来源对比**：同一事件，国内媒体 vs 国外媒体怎么说（标题对比）
 - **关键实体**：人物、地点、组织的高亮展示
 - **相关话题**：底部推荐相似事件
@@ -208,7 +209,8 @@ Article（原始文章）
 HotEvent（AI 生成的话题/热点）
   - id, title, summary, category, hot_score, trend
   - sentiment, entities(JSON), articles_count, sources_count
-  - first_seen_at, last_updated_at, cover_image
+  - first_seen_at, last_updated_at, aggregated_at, cover_image
+  - aggregated_at：满 3 篇且跨 2 源的达标瞬间写入，永不更新；首页排序/展示字段
 
 EventArticle（关联表：热点 ←→ 文章）
   - event_id, article_id, relevance_score

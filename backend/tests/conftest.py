@@ -1,9 +1,14 @@
 import os
 
 # Must set before any app imports so settings use test values
-os.environ.setdefault("DATABASE_URL", "sqlite:///:memory:")
+# 注意必须是赋值而不是 setdefault：容器/CI 里 DATABASE_URL 是已存在的环境变量，
+# setdefault 不会覆盖，_find_similar_event 就会走 pgvector 分支去查 SQLite 的 JSON 列
+os.environ["DATABASE_URL"] = "sqlite:///:memory:"
 os.environ.setdefault("DEBUG", "true")
 os.environ.setdefault("OPENAI_API_KEY", "test-key")
+# Token 鉴权测试用固定值（优先级高于项目根 .env）
+os.environ["READ_TOKEN"] = "test-read-token"
+os.environ["WRITE_TOKEN"] = "test-write-token"
 
 import asyncio
 import pytest
@@ -77,7 +82,14 @@ def client(db):
 
     test_app.dependency_overrides[get_db] = override_get_db
 
-    with TestClient(test_app) as c:
+    # 默认带上读写令牌，业务用例不必关心鉴权；无 token 的用例单独建 client
+    with TestClient(
+        test_app,
+        headers={
+            "X-Read-Token": "test-read-token",
+            "X-Write-Token": "test-write-token",
+        },
+    ) as c:
         yield c
 
     test_app.dependency_overrides.clear()

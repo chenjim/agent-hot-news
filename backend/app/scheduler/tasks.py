@@ -17,6 +17,8 @@ from app.scheduler.state import set_last_fetch_time, set_last_ai_time
 settings = get_settings()
 scheduler = AsyncIOScheduler()
 
+AI_RETRY_SECONDS = 5  # brief delay before the next immediate pass when a backlog remains
+
 
 def _next_fetch_time() -> datetime:
     """Calculate next fetch run time based on time-of-day.
@@ -37,9 +39,20 @@ def _next_fetch_time() -> datetime:
     return now + timedelta(minutes=minutes)
 
 
-def _next_ai_time() -> datetime:
-    """Calculate next AI process run time (fixed interval)."""
+def _next_ai_time(has_remaining: bool = False) -> datetime:
+    """Calculate next AI process run time.
+
+    When unprocessed articles remain, run again almost immediately to drain
+    the backlog; otherwise keep the normal fixed interval.
+    """
+    if has_remaining:
+        return datetime.now() + timedelta(seconds=AI_RETRY_SECONDS)
     return datetime.now() + timedelta(minutes=settings.AI_PROCESS_INTERVAL_MINUTES)
+
+
+def _first_ai_time() -> datetime:
+    """Run the first AI pass right after startup to avoid a long wait."""
+    return datetime.now()
 
 
 def _take_snapshot(db: Session) -> dict:
@@ -118,7 +131,17 @@ def fetch_task():
             manager = CollectorManager(db)
             articles = await manager.fetch_all()
 
-            new_count = manager.save_articles(articles)
+            # 原文不入库：带原文的条目先做 LLM 摘要，失败的本条跳过、下一轮重试。
+            # 摘要前先做去重：已在库的条目（URL 或 来源+标题 命中）不再重复过 LLM，
+            # 但保留在列表里，落库时照常刷新热度与采集时间。
+            from app.ai_pipeline.article_summarizer import ArticleSummarizer
+
+            existing = manager.load_existing(articles)
+            articles = await ArticleSummarizer().process(
+                articles, is_known=manager.known_predicate(*existing)
+            )
+
+            new_count = manager.save_articles(articles, existing=existing)
             db.commit()
             logger.info(f"Fetch task complete: {new_count} new articles saved")
         except Exception as e:
@@ -147,11 +170,13 @@ def ai_process_task():
 
     Runs in a background thread (via AsyncIOScheduler's default executor)
     so sync SQLAlchemy operations do not block the event loop.
+    Reschedules itself almost immediately when unprocessed articles remain.
     """
     from app.scheduler.state import set_last_ai_time
     set_last_ai_time()  # Mark AI process start time
 
-    async def _run():
+    async def _run() -> bool:
+        """Run one pipeline pass; return True if unprocessed articles remain."""
         db = SessionLocal()
         try:
             # Snapshot before processing
@@ -166,21 +191,31 @@ def ai_process_task():
             # Notify SSE subscribers of changes
             await _notify_sse_changes(before_snapshot, after_snapshot)
 
-            logger.info("AI process task complete")
+            remaining = (
+                db.query(Article)
+                .filter(Article.is_processed.is_(False))
+                .count()
+            )
+            logger.info(f"AI process task complete, {remaining} unprocessed articles remaining")
+            return remaining > 0
         except Exception as e:
             logger.error(f"AI process task error: {e}")
             db.rollback()
+            return False
         finally:
             db.close()
 
-    asyncio.run(_run())
+    try:
+        has_remaining = asyncio.run(_run())
+    except Exception:
+        has_remaining = False
 
-    # Reschedule next run with fixed interval
+    # Reschedule: drain the backlog quickly, otherwise use the fixed interval
     try:
         scheduler.add_job(
             ai_process_task,
             trigger="date",
-            run_date=_next_ai_time(),
+            run_date=_next_ai_time(has_remaining),
             id="ai_process",
             replace_existing=True,
         )
@@ -188,9 +223,14 @@ def ai_process_task():
         logger.exception("Failed to reschedule AI process task")
 
 
+def _cleanup_cutoff() -> datetime:
+    """Cutoff for cleanup: delete data older than the retention window."""
+    return datetime.now() - timedelta(days=settings.CLEANUP_RETENTION_DAYS)
+
+
 def cleanup_task():
-    """Scheduled task: delete articles and events older than 10 days."""
-    cutoff = datetime.now() - timedelta(days=10)
+    """Scheduled task: delete articles and events older than the retention window."""
+    cutoff = _cleanup_cutoff()
 
     async def _run():
         db = SessionLocal()
@@ -245,11 +285,11 @@ def start_scheduler():
     scheduler.add_job(
         ai_process_task,
         trigger="date",
-        run_date=_next_ai_time(),
+        run_date=_first_ai_time(),
         id="ai_process",
         replace_existing=True,
     )
-    logger.info("Scheduler started: daily cleanup at 00:00, adaptive fetch intervals")
+    logger.info("Scheduler started: daily cleanup at 00:00, adaptive fetch intervals, AI runs immediately then on demand")
 
 
 def stop_scheduler():

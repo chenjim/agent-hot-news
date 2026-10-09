@@ -6,3 +6,5 @@ logs/
 .env.local
 .git
 *.md
+# 真实 cookie 绝不能烘进镜像层（运行时走 bind mount /app/cookie.*.txt）
+cookie.*.txt

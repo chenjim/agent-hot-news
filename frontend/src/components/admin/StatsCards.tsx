@@ -41,11 +41,15 @@ const cards = [
   },
   {
     key: 'uptime' as const,
-    label: '系统运行时间',
+    label: '系统累计运行时间',
     icon: Clock,
     color: 'text-purple-500',
     bg: 'bg-purple-500/10',
     getValue: (s: AdminStats) => formatUptime(s.uptime_seconds),
+    getHint: (s: AdminStats) =>
+      s.first_started_at
+        ? `自 ${new Date(s.first_started_at).toLocaleDateString('zh-CN')} 起，重启不归零`
+        : null,
   },
 ];
 
@@ -77,6 +81,9 @@ export default function StatsCards({ stats, isLoading }: StatsCardsProps) {
               <div>
                 <p className="text-sm text-muted-foreground">{card.label}</p>
                 <p className="mt-1 text-2xl font-bold">{value}</p>
+                {stats && !isLoading && card.getHint && card.getHint(stats) && (
+                  <p className="mt-1 text-xs text-muted-foreground">{card.getHint(stats)}</p>
+                )}
               </div>
               <div className={cn('rounded-lg p-2.5', card.bg)}>
                 <Icon className={cn('h-5 w-5', card.color)} />

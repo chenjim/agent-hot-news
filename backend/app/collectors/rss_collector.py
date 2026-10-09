@@ -86,8 +86,9 @@ class RSSCollector(BaseCollector):
                 RawArticle(
                     url=url,
                     title=entry.title if hasattr(entry, "title") else "",
-                    summary=summary[:1000] if summary else None,
-                    content=content[:5000] if content else None,
+                    # 不截断：原文完整交给上层的 LLM 摘要（原文本身不会入库）
+                    summary=summary or None,
+                    content=content or None,
                     published_at=published,
                     source_name=self.name,
                     source_url=self.endpoint,

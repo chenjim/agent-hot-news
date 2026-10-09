@@ -1,5 +1,6 @@
 # Environment variables
 .env
+cookie*.txt
 
 # Python
 __pycache__/
@@ -21,7 +22,6 @@ build/
 # Database
 *.sqlite
 *.sqlite3
-hotnews.db
 
 # Node.js
 node_modules/
@@ -34,6 +34,9 @@ frontend/dist/
 
 # Logs
 logs/
+
+# 系统运行时状态（首次上线时间等），随容器 bind mount 持久化
+backend/data/
 *.log
 
 # IDE

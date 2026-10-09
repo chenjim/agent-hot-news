@@ -1,9 +1,8 @@
-import { useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { ArrowLeft, TrendingUp, TrendingDown, Flame, Clock, Globe, Newspaper, ChevronDown, ChevronUp } from 'lucide-react';
+import { ArrowLeft, TrendingUp, TrendingDown, Flame, Globe, Newspaper, Search } from 'lucide-react';
 import Header from '@/components/Header';
 import { useHotEventDetail } from '@/hooks/useApi';
-import { cn, formatRelativeTime, getSentimentColor, getSentimentLabel } from '@/lib/utils';
+import { cn, getSentimentColor, getSentimentLabel } from '@/lib/utils';
 
 function TrendIcon({ trend, className }: { trend: string; className?: string }) {
   const sizeClass = 'h-5 w-5';
@@ -14,8 +13,22 @@ function TrendIcon({ trend, className }: { trend: string; className?: string }) 
 
 export default function EventDetailPage() {
   const { id } = useParams<{ id: string }>();
-  const { event, error, isLoading } = useHotEventDetail(id ? parseInt(id) : null);
-  const [expandedSources, setExpandedSources] = useState<Set<number>>(new Set());
+  const eventId = id && /^\d+$/.test(id) ? Number(id) : null;
+  const { event, error, isLoading } = useHotEventDetail(eventId);
+
+  if (id && eventId === null) {
+    return (
+      <div className="min-h-screen bg-background">
+        <Header />
+        <div className="container mx-auto px-4 py-20 text-center">
+          <p className="text-muted-foreground">事件不存在</p>
+          <Link to="/" className="mt-4 inline-block text-primary hover:underline">
+            返回首页
+          </Link>
+        </div>
+      </div>
+    );
+  }
 
   if (error) {
     return (
@@ -128,100 +141,54 @@ export default function EventDetailPage() {
           </section>
         )}
 
-        <div className="grid gap-6 lg:grid-cols-3">
-          {/* Timeline */}
-          <section className="lg:col-span-2">
-            <h2 className="mb-4 text-lg font-bold">传播时间线</h2>
-            <div className="rounded-xl border border-border bg-card p-4">
-              {event.timeline.length === 0 ? (
-                <p className="py-8 text-center text-sm text-muted-foreground">暂无时间线数据</p>
-              ) : (
-                <div className="relative space-y-0">
-                  {event.timeline.map((item, i) => (
-                    <div key={i} className="flex gap-4 pb-6 last:pb-0">
-                      <div className="flex flex-col items-center">
-                        <div className="h-2.5 w-2.5 rounded-full bg-primary" />
-                        {i < event.timeline.length - 1 && (
-                          <div className="mt-1 h-full w-px bg-border" />
-                        )}
-                      </div>
-                      <div className="flex-1 pb-2">
-                        <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                          <Clock className="h-3 w-3" />
-                          <span>{item.time ? formatRelativeTime(item.time) : '未知时间'}</span>
-                          <span className="rounded bg-secondary px-1.5 py-0.5">{item.source}</span>
-                        </div>
-                        <p className="mt-1 text-sm">{item.title}</p>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          </section>
-
-          {/* Sources sidebar */}
-          <section>
-            <h2 className="mb-4 text-lg font-bold">来源报道</h2>
-            <div className="space-y-3">
-              {event.sources.length === 0 ? (
-                <div className="rounded-xl border border-border bg-card p-4 text-center text-sm text-muted-foreground">
-                  暂无来源数据
-                </div>
-              ) : (
-                event.sources.map((source, i) => {
-                  const baiduSearchUrl = `https://www.baidu.com/s?ie=utf-8&wd=${encodeURIComponent(source.title)}`;
-                  const isTianapi = !source.url || source.url.startsWith('tianapi://');
-                  const linkUrl = isTianapi ? baiduSearchUrl : source.url;
-                  const isExpanded = expandedSources.has(i);
-                  const hasContent = source.content && source.content.trim().length > 0;
-                  return (
-                    <div
-                      key={i}
-                      className="rounded-lg border border-border bg-card transition-all hover:border-primary/30 hover:shadow-md"
+        {/* Sources */}
+        <section>
+          <h2 className="mb-4 text-lg font-bold">来源报道</h2>
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {event.sources.length === 0 ? (
+              <div className="rounded-xl border border-border bg-card p-4 text-center text-sm text-muted-foreground sm:col-span-2 lg:col-span-3">
+                暂无来源数据
+              </div>
+            ) : (
+              event.sources.map((source, i) => {
+                const bingSearchUrl = `https://www.bing.com/search?q=${encodeURIComponent(source.title)}`;
+                const isHttp =
+                  source.url.startsWith('http://') || source.url.startsWith('https://');
+                // 后端探测过可浏览性：伪 URL / 打不开（403、超时、非网页）→ 必应搜索兜底
+                const linkUrl = isHttp && source.browsable !== false ? source.url : bingSearchUrl;
+                const useFallback = linkUrl !== source.url;
+                return (
+                  <div
+                    key={i}
+                    className="rounded-lg border border-border bg-card transition-all hover:border-primary/30 hover:shadow-md"
+                  >
+                    <a
+                      href={linkUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="block p-3"
+                      title={useFallback ? '原文链接不可达，已改为搜索该标题' : '打开原文'}
                     >
-                      <a
-                        href={linkUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="block p-3"
-                      >
-                        <div className="flex items-center justify-between">
-                          <span className="text-xs font-medium text-primary">{source.name}</span>
-                          <span className="text-xs text-muted-foreground">{source.hot_score.toFixed(0)}</span>
-                        </div>
-                        <p className="mt-1 line-clamp-2 text-sm">{source.title}</p>
-                      </a>
-                      {hasContent && (
-                        <div className="border-t border-border px-3 pb-2">
-                          <button
-                            onClick={() => {
-                              setExpandedSources((prev) => {
-                                const next = new Set(prev);
-                                if (next.has(i)) next.delete(i);
-                                else next.add(i);
-                                return next;
-                              });
-                            }}
-                            className="flex w-full items-center gap-1 py-2 text-xs text-muted-foreground transition-colors hover:text-primary"
-                          >
-                            {isExpanded ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
-                            {isExpanded ? '收起内容' : '查看内容'}
-                          </button>
-                          {isExpanded && (
-                            <p className="text-xs leading-relaxed text-muted-foreground whitespace-pre-line">
-                              {source.content}
-                            </p>
+                      <div className="flex items-center justify-between">
+                        <span className="flex items-center gap-1 text-xs font-medium text-primary">
+                          {source.name}
+                          {useFallback && (
+                            <span className="inline-flex items-center gap-0.5 rounded bg-secondary px-1 py-0.5 text-[10px] text-muted-foreground">
+                              <Search className="h-2.5 w-2.5" />
+                              搜索
+                            </span>
                           )}
-                        </div>
-                      )}
-                    </div>
-                  );
-                })
-              )}
-            </div>
-          </section>
-        </div>
+                        </span>
+                        <span className="text-xs text-muted-foreground">{source.hot_score.toFixed(0)}</span>
+                      </div>
+                      <p className="mt-1 line-clamp-2 text-sm">{source.title}</p>
+                    </a>
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </section>
       </main>
     </div>
   );

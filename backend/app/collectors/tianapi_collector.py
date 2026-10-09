@@ -101,7 +101,8 @@ class TianapiCollector(BaseCollector):
 
             summary = item.get("description") or item.get("digest", "") or None
             if summary:
-                summary = str(summary)[:1000]
+                # 不截断：原文交给上层 LLM 摘要（原文本身不入库）
+                summary = str(summary)
 
             published = None
             ctime = item.get("ctime", "")
