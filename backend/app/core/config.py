@@ -92,15 +92,11 @@ def get_settings() -> Settings:
     return s
 
 
-# OpenCode Go 要求：base_url 含 opencode.ai 时携带 x-opencode-session（进程内稳定，用于服务端优化）
+# OpenCode Go 网关要求每个请求携带 x-opencode-session（进程内稳定，用于路由与 prompt 缓存）。
+# 早前只在 base_url 含 opencode.ai 时才带头，改为经 new-api（tok.h89.cn，渠道全透传）中转后
+# 判断不命中、头丢失，上游 400 MissingSessionID。现统一带上：对无关端点无害，避免换域名再踩坑。
 OPENCODE_SESSION_ID = os.environ.get("OPENCODE_SESSION_ID") or f"agent-hot-news-{uuid.uuid4()}"
 
 
-def is_opencode_endpoint(base_url: str) -> bool:
-    return "opencode.ai" in base_url
-
-
 def llm_extra_headers(base_url: str) -> dict:
-    if not is_opencode_endpoint(base_url):
-        return {}
     return {"x-opencode-session": OPENCODE_SESSION_ID}

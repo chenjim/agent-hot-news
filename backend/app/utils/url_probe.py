@@ -10,11 +10,16 @@
 关键点：**探测不走出站代理**（``trust_env=False``），模拟国内浏览器直连 —— 否则
 Google News、FT 这类"走代理能通、访客打不开"的链接会被误判为可用。
 
-缓存：成功 24h，失败 2h（网络抖动不应长期判死一个链接）。进程内字典缓存，
-重启即失效，靠下次访问重建。
+缓存：成功 24h，失败 2h（网络抖动不应长期判死一个链接）。结论同时写 Redis
+（``probe:url:<sha1>``，与内存同样的 TTL），进程重启或多 worker 时仍能命中；
+内存字典只是 Redis 之上的快路径。
+
+接口侧用 ``get_probe_cache`` 只读结论、``warm`` 后台补冷：详情页不再为探测
+阻塞请求（此前单链接最长 5s、整页预算 7s，首次打开能卡到 7s）。
 """
 
 import asyncio
+import hashlib
 import ipaddress
 import time
 from typing import Dict, Optional, Tuple, Union
@@ -22,6 +27,8 @@ from urllib.parse import quote
 
 import httpx
 from loguru import logger
+
+from app.cache.redis_client import get_redis_client
 
 PROBE_TIMEOUT = 5.0          # 单个链接探测上限
 CONCURRENCY = 4              # 并发探测上限
@@ -38,6 +45,9 @@ _UA = (
 # url -> (browsable, expires_at)
 _cache: Dict[str, Tuple[bool, float]] = {}
 _sem = asyncio.Semaphore(CONCURRENCY)
+# 正在后台预热的 URL / 持引用防止任务被 GC
+_warming: set = set()
+_warm_tasks: set = set()
 
 
 def is_browser_url(url: Optional[str]) -> bool:
@@ -58,6 +68,32 @@ def _cached(url: str) -> Optional[bool]:
         _cache.pop(url, None)
         return None
     return ok
+
+
+def _redis_key(url: str) -> str:
+    return "probe:url:" + hashlib.sha1(url.encode()).hexdigest()
+
+
+async def _load_from_redis(url: str) -> Optional[bool]:
+    """读 Redis 结论并回填内存缓存；Redis 不可用时静默降级为纯内存模式。"""
+    try:
+        raw = await get_redis_client().get(_redis_key(url))
+    except Exception as exc:  # noqa: BLE001
+        logger.debug(f"URL 探测缓存读取失败 {type(exc).__name__}: {url[:100]}")
+        return None
+    if raw is None:
+        return None
+    ok = raw == "1"
+    _cache[url] = (ok, time.time() + (OK_TTL if ok else FAIL_TTL))
+    return ok
+
+
+async def _save_to_redis(url: str, ok: bool) -> None:
+    ttl = OK_TTL if ok else FAIL_TTL
+    try:
+        await get_redis_client().setex(_redis_key(url), ttl, "1" if ok else "0")
+    except Exception as exc:  # noqa: BLE001
+        logger.debug(f"URL 探测缓存写入失败 {type(exc).__name__}: {url[:100]}")
 
 
 def _is_global_ip(ip: Union[ipaddress.IPv4Address, ipaddress.IPv6Address]) -> bool:
@@ -146,6 +182,10 @@ async def is_browsable(url: Optional[str]) -> bool:
     if hit is not None:
         return hit
 
+    remote = await _load_from_redis(target)
+    if remote is not None:
+        return remote
+
     async with _sem:
         try:
             ok = await _probe(target)
@@ -154,15 +194,62 @@ async def is_browsable(url: Optional[str]) -> bool:
             return False
 
     _cache[target] = (ok, time.time() + (OK_TTL if ok else FAIL_TTL))
+    await _save_to_redis(target, ok)
     if not ok:
         logger.info(f"来源链接不可浏览（将走搜索兜底）: {target[:120]}")
     return ok
 
 
-async def probe_many(urls: list) -> Dict[str, bool]:
-    """批量探测，未缓存的并行查，返回 url -> browsable。"""
-    unique = list({u for u in urls if is_browser_url(u)})
-    if not unique:
-        return {}
-    await asyncio.gather(*(is_browsable(u) for u in unique))
-    return {u: bool(_cached(u)) for u in unique}
+async def get_probe_cache(urls: list) -> Dict[str, bool]:
+    """只读已有结论（内存优先，其次 Redis），绝不发起网络探测。
+
+    未命中的 URL 不出现在返回值里，由调用方按 ``is_browser_url`` 兜底，
+    再用 ``warm`` 丢到后台补探测。
+    """
+    result: Dict[str, bool] = {}
+    missing = []
+    for url in {u for u in urls if is_browser_url(u)}:
+        hit = _cached(url)
+        if hit is None:
+            missing.append(url)
+        else:
+            result[url] = hit
+    if not missing:
+        return result
+
+    try:
+        values = await get_redis_client().mget([_redis_key(u) for u in missing])
+    except Exception as exc:  # noqa: BLE001
+        logger.debug(f"URL 探测缓存批量读取失败 {type(exc).__name__}")
+        return result
+
+    for url, raw in zip(missing, values):
+        if raw is None:
+            continue
+        ok = raw == "1"
+        _cache[url] = (ok, time.time() + (OK_TTL if ok else FAIL_TTL))
+        result[url] = ok
+    return result
+
+
+async def _warm_one(url: str) -> None:
+    try:
+        await is_browsable(url)
+    finally:
+        _warming.discard(url)
+
+
+def warm(urls: list) -> None:
+    """后台预热：给没有结论的链接排探测任务，立即返回，不阻塞请求。"""
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return  # 非事件循环环境（如脚本）无需预热
+
+    for url in {u for u in urls if is_browser_url(u)}:
+        if _cached(url) is not None or url in _warming:
+            continue
+        _warming.add(url)
+        task = loop.create_task(_warm_one(url))
+        _warm_tasks.add(task)
+        task.add_done_callback(_warm_tasks.discard)

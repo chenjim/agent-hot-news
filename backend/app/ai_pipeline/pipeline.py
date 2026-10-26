@@ -14,6 +14,12 @@ B  向量只召回、LLM 判归属 —— 每个待归类条目召回 top-K 候�
 C  outlier 进待定池 —— 不再标记 is_processed 后永久丢弃，改为每轮
    重新参与归属判定，直到被某个事件收编，或重试满 ROUTE_MAX_ATTEMPTS
    轮后老化出池。这样"事件晚几轮才出现"的同主题文章还能被拉回来。
+
+D  判重补盲区 —— B 的候选是开跑时一次性召回的，同轮里先建出来的事件
+   对后续条目不可见（实测："重庆原市长黄奇帆被查"与"黄奇帆被查"同批两簇
+   建成 #4150/#4151 两个事件）。两处补漏：建事件前拿本轮已建事件再判一次
+   （同批判重）；每轮开跑对标题不等但疑似同事件的存量事件做 LLM 判重合并
+   （自愈判重）。LLM 判不是就放行 —— 漏并下轮还能自愈，误并无法挽回。
 """
 
 from typing import Dict, Iterable, List, Optional, Sequence, Tuple
@@ -36,6 +42,17 @@ settings = get_settings()
 
 # 摘要短于这个长度的不算有效上下文（热榜常见 "..."、"新事件上榜" 占位）
 _MIN_MEANINGFUL_SUMMARY = 10
+
+# D：自愈判重的召回口径（阈值按 2026-10 实测分布定）
+#   - 标题包含对：7 天窗口实测只有个位数对，零成本高精度
+#     （"黄奇帆被查" ⊂ "重庆原市长黄奇帆被查"）
+#   - 新生事件（_MERGE_LOOKBACK_HOURS 内）之间质心相似度 ≥ _MERGE_SIM_FLOOR
+#     的对：实测约 40 对，一次批量 LLM 判定可控。全窗口高相似对有数百且多为
+#     "同话题不同事件"（同一运动员不同场次等），不做全量判定
+_MERGE_TITLE_MIN_LEN = 5
+_MERGE_SIM_FLOOR = 0.6
+_MERGE_LOOKBACK_HOURS = 48
+_MERGE_MAX_PAIRS = 80
 
 
 @dataclass
@@ -62,15 +79,17 @@ class AIPipeline:
     async def run(self, max_articles: int = 500):
         """
         Main pipeline:
-        1. 合并窗口内历史同名事件（A）
+        1. 合并窗口内历史重复事件（A 标题硬合并 + D 自愈判重）
         2. Fetch unprocessed articles
         3. Compute embeddings
         4. Cluster（批内压缩：一个簇 = 一次摘要调用）
         5. 向量召回 + LLM 归属判定（B）
-        6. 逐簇 / 逐篇落库；outlier 进待定池（C）
+        6. 逐簇 / 逐篇落库；outlier 进待定池（C）；同批判重（D）
         """
         # A：先自愈历史重复，否则重复事件会同时进召回候选干扰判定
         self._merge_duplicate_events()
+        # D：标题不等但同事件的存量重复，交给 LLM 判重合并
+        await self._merge_similar_events()
 
         articles = self._get_unprocessed_articles(max_articles)
         if not articles:
@@ -131,11 +150,12 @@ class AIPipeline:
         }
 
         # Step 4: 落库
+        new_events: List[HotEvent] = []
         for pending in pendings:
             if pending.kind == "cluster":
                 await self._apply_cluster(
                     pending, articles, embeddings, decision_by_key,
-                    route_failed, title_index,
+                    route_failed, title_index, new_events,
                 )
             else:
                 self._apply_noise(pending, articles, decision_by_key)
@@ -269,6 +289,124 @@ class AIPipeline:
             f"  并入 {moved} 篇文章，#{keep.id} 现有 {keep.articles_count} 篇 / "
             f"{keep.sources_count} 源"
         )
+
+    async def _merge_similar_events(self) -> None:
+        """D：自愈判重 —— 标题不等但同一事件的，交给 LLM 判定后合并。
+
+        标题硬合并（A）只认归一化标题完全相等；"重庆原市长黄奇帆被查" vs
+        "黄奇帆被查"这类同事件不同措辞要靠语义判定。判定层不可用时跳过本轮，
+        下轮继续。
+        """
+        events = self._window_events()
+        pairs = self._merge_candidate_pairs(events)
+        if not pairs:
+            return
+
+        items: List[RouteItem] = []
+        candidates: Dict[str, Sequence[Tuple[int, str]]] = {}
+        for keep, dup in pairs:
+            key = f"event:{dup.id}"
+            items.append(
+                RouteItem(
+                    key=key,
+                    title=dup.title,
+                    summary=(dup.summary or "").strip()[:200],
+                )
+            )
+            candidates[key] = [(keep.id, keep.title)]
+
+        routed = await self.router.route(items, candidates)
+        if routed is None:
+            logger.warning("自愈判重判定不可用，跳过本轮事件合并")
+            return
+
+        decision_by_key = {d.key: d.event_id for d in routed}
+        merged_away: set = set()
+        merged = 0
+        for keep, dup in pairs:
+            # dup 被并掉后就不再是合法目标（如链式 A<-B<-C 里的 B）
+            if keep.id in merged_away or dup.id in merged_away:
+                continue
+            if decision_by_key.get(f"event:{dup.id}") != keep.id:
+                continue
+            logger.info(f"自愈判重: #{dup.id} {dup.title!r} -> #{keep.id} {keep.title!r}")
+            self._merge_event_into(keep, dup)
+            merged_away.add(dup.id)
+            merged += 1
+
+        if merged:
+            self.db.commit()
+            logger.info(f"自愈判重共合并 {merged} 个重复事件")
+
+    def _merge_candidate_pairs(
+        self, events: Sequence[HotEvent]
+    ) -> List[Tuple[HotEvent, HotEvent]]:
+        """(keep, dup) 判重候选对，keep 沿用硬合并的取舍（文章多、其次 id 小）。
+
+        召回两路：归一化标题一方包含另一方（全窗口、高精度），
+        新生事件之间质心相似度过高的（限时限阈值控量）。LLM 才是判定者。
+        """
+        pairs: List[Tuple[HotEvent, HotEvent]] = []
+        seen_dups: set = set()
+
+        def add(a: HotEvent, b: HotEvent) -> None:
+            keep, dup = sorted(
+                (a, b), key=lambda e: (-(e.articles_count or 0), e.id)
+            )
+            # dup 只能出现一次，否则路由条目 key 撞车
+            if dup.id in seen_dups:
+                return
+            seen_dups.add(dup.id)
+            pairs.append((keep, dup))
+
+        # 1) 标题包含
+        norms = [(e, normalize_title(e.title)) for e in events]
+        for i, (ea, na) in enumerate(norms):
+            if len(na) < _MERGE_TITLE_MIN_LEN:
+                continue
+            for eb, nb in norms[i + 1 :]:
+                if len(nb) < _MERGE_TITLE_MIN_LEN or na == nb:
+                    continue
+                if na in nb or nb in na:
+                    add(ea, eb)
+
+        # 2) 新生事件高相似对，按相似度降序，别把包含对挤出预算
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=_MERGE_LOOKBACK_HOURS)
+        young: List[HotEvent] = []
+        vectors: List[np.ndarray] = []
+        for ev in events:
+            first_seen = self._ensure_utc(ev.first_seen_at)
+            if first_seen is None or first_seen < cutoff:
+                continue
+            try:
+                arr = np.asarray(ev.embedding_centroid, dtype=np.float64).ravel()
+            except (TypeError, ValueError):
+                continue
+            if arr.size == 0:
+                continue
+            young.append(ev)
+            vectors.append(arr)
+
+        sims: List[Tuple[float, HotEvent, HotEvent]] = []
+        for i, a in enumerate(vectors):
+            na = np.linalg.norm(a)
+            if na == 0:
+                continue
+            for j in range(i + 1, len(vectors)):
+                b = vectors[j]
+                if b.size != a.size:
+                    continue
+                nb = np.linalg.norm(b)
+                if nb == 0:
+                    continue
+                score = float(np.dot(a, b) / (na * nb))
+                if score >= _MERGE_SIM_FLOOR:
+                    sims.append((score, young[i], young[j]))
+        sims.sort(key=lambda t: -t[0])
+        for _, a, b in sims[:_MERGE_MAX_PAIRS]:
+            add(a, b)
+
+        return pairs
 
     # ------------------------------------------------------------------
     # B：召回
@@ -405,6 +543,7 @@ class AIPipeline:
         decision_by_key: Dict[str, Optional[int]],
         route_failed: bool,
         title_index: Dict[str, HotEvent],
+        new_events: Optional[List[HotEvent]] = None,
     ) -> None:
         indexes = pending.article_indexes
         cluster_articles = [articles[i] for i in indexes]
@@ -424,6 +563,10 @@ class AIPipeline:
             pending, summary_result.get("title"), centroid,
             decision_by_key, route_failed, title_index,
         )
+        # D：同批判重 —— 本轮先建出来的事件不在 B 的召回候选里，
+        # 建新事件前拿它们再判一次
+        if event is None and not route_failed and new_events:
+            event = await self._dedupe_same_batch(pending, summary_result, new_events)
 
         # 同一来源不聚合：新建事件前，以及并入已有事件后，都必须跨来源
         if event is None:
@@ -451,11 +594,49 @@ class AIPipeline:
                 cluster_articles, summary_result, centroid, hot_score
             )
             self._index_created(event, title_index)
+            if new_events is not None:
+                new_events.append(event)
 
         for article in cluster_articles:
             article.is_processed = True
             article.route_attempts = 0
         self.db.commit()
+
+    async def _dedupe_same_batch(
+        self,
+        pending: _PendingItem,
+        summary: Dict,
+        new_events: Sequence[HotEvent],
+    ) -> Optional[HotEvent]:
+        """D：同批判重 —— 与本轮已建事件比对，同一事件就并入，不再建新。
+
+        归属判定（B）的候选是开跑时一次性召回的，同轮先建出来的事件对后续
+        条目不可见（实测：黄奇帆同批两簇建成 #4150/#4151 两个事件）。
+        判定层不可用时按新事件处理，与 B 的失败语义一致。
+        """
+        if not new_events:
+            return None
+        key = f"samebatch:{pending.key}"
+        item = RouteItem(
+            key=key,
+            title=(summary.get("title") or pending.title or "").strip(),
+            summary=(summary.get("summary") or pending.summary or "").strip()[:200],
+        )
+        candidates: Dict[str, Sequence[Tuple[int, str]]] = {
+            key: [(e.id, e.title) for e in new_events]
+        }
+        routed = await self.router.route([item], candidates)
+        if routed is None:
+            logger.warning("同批判重判定不可用，按新事件处理")
+            return None
+        target_id = routed[0].event_id
+        if target_id is None:
+            return None
+        for event in new_events:
+            if event.id == target_id:
+                logger.info(f"  同批判重 -> #{event.id} {event.title!r}")
+                return event
+        return None
 
     def _resolve_event(
         self,

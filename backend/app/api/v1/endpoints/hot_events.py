@@ -1,5 +1,3 @@
-import asyncio
-
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func
 from sqlalchemy.orm import Session
@@ -11,10 +9,7 @@ from app.models.models import HotEvent, EventArticle, Article
 from app.schemas.hot_event import HotEventListItem, HotEventDetail
 from app.cache import cache_response
 from app.utils.timezone import get_tz
-from app.utils.url_probe import PROBE_TIMEOUT, is_browser_url, probe_many
-
-# 详情接口整体探测预算：单个 5s + 2s 余量，超时则退回「http 即认为可用」
-_PROBE_BUDGET = PROBE_TIMEOUT + 2
+from app.utils.url_probe import get_probe_cache, is_browser_url, warm
 
 router = APIRouter()
 
@@ -59,7 +54,12 @@ async def get_hot_event_detail(
     event_id: int,
     db: Session = Depends(get_db),
 ):
-    """Get detailed information about a specific hot event."""
+    """Get detailed information about a specific hot event.
+
+    来源链接的可浏览性只读缓存结论（Redis 24h/2h + 内存），未命中先按
+    「是 http 就算可用」返回，再丢后台预热 —— 不再让访客等探测（此前首次
+    打开最坏 7s）。响应本身不做整体缓存，避免把陈旧的 browsable 结论锁 60s。
+    """
     event = db.query(HotEvent).filter(HotEvent.id == event_id).first()
     if not event:
         raise HTTPException(status_code=404, detail="Event not found")
@@ -79,14 +79,11 @@ async def get_hot_event_detail(
     timeline = []
     sources = []
 
-    # 来源链接可浏览性：伪 URL 一律 false；http(s) 并行探测一次并缓存（成功 24h / 失败 2h）。
-    # 探测不走出站代理，和访客直连一致；超时则退回「是 http 就认为可用」，不让接口挂住。
-    try:
-        probe = await asyncio.wait_for(
-            probe_many([a.url for _, a in event_articles]), timeout=_PROBE_BUDGET
-        )
-    except Exception:
-        probe = {}
+    # 来源链接可浏览性：伪 URL 一律 false；http(s) 只读已有结论（Redis 24h/2h），
+    # 未命中的先在本次响应里按「是 http 就认为可用」兜底，再丢后台预热补结论。
+    # 探测不走出站代理，和访客直连一致。
+    probe = await get_probe_cache([a.url for _, a in event_articles])
+    warm([a.url for _, a in event_articles])
 
     for ea, article in event_articles:
         timeline.append({

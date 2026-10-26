@@ -865,3 +865,221 @@ class TestPublishThreshold:
         assert keep.articles_count == 3
         # SQLite 取回来的时间戳不带时区，比较前先归一到 UTC
         assert AIPipeline._ensure_utc(keep.aggregated_at) == now - timedelta(hours=2)
+
+
+# ======================================================================
+# F：同批判重 + 自愈判重（流水线 D）
+# ======================================================================
+class TestSameBatchDedupe:
+    """同批两簇同事件必须合成一个 —— B 的候选召回发生在建事件之前，
+    同轮先建出来的事件对后续条目不可见，是聚合链路的盲区（#4150/#4151）。"""
+
+    @staticmethod
+    def _four_articles(db):
+        now = _now()
+        arts = [
+            Article(title=f"黄奇帆条目{i}", url=f"http://sb/{i}",
+                    source_name=src, fetched_at=now)
+            for i, src in enumerate(("baidu_hot", "toutiao", "weibo", "google_news"))
+        ]
+        db.add_all(arts)
+        db.commit()
+        return arts
+
+    @staticmethod
+    def _mocked(pipeline):
+        # 两簇：前两篇同向量、后两篇同向量，跨簇余弦距离远于 eps
+        pipeline.embedding.embed_texts = AsyncMock(
+            return_value=[[1.0, 0.0], [1.0, 0.0], [0.0, 1.0], [0.0, 1.0]]
+        )
+        pipeline.summarizer.summarize_cluster = AsyncMock(
+            side_effect=[
+                {
+                    "title": "重庆原市长黄奇帆被查", "summary": "摘要一", "detail": "d",
+                    "category": "social", "sentiment": "neutral", "entities": [],
+                },
+                {
+                    "title": "黄奇帆被查", "summary": "摘要二", "detail": "d",
+                    "category": "social", "sentiment": "neutral", "entities": [],
+                },
+            ]
+        )
+        return pipeline
+
+    @staticmethod
+    def _merge_into_candidate(items, candidates):
+        """首个候选存在就判'同一事件'（并入），无候选判'新事件'。"""
+        decisions = []
+        for it in items:
+            got = (candidates.get(it.key) or [(None, "")])[0][0]
+            decisions.append(RouteDecision(key=it.key, event_id=got))
+        return decisions
+
+    @pytest.mark.asyncio
+    async def test_same_batch_clusters_merge_into_one_event(self, db):
+        self._four_articles(db)
+        pipeline = self._mocked(AIPipeline(db))
+        pipeline.router.route = AsyncMock(
+            side_effect=lambda items, candidates: self._merge_into_candidate(items, candidates)
+        )
+
+        await pipeline.run(max_articles=100)
+
+        db.expire_all()
+        events = db.query(HotEvent).all()
+        assert len(events) == 1
+        assert events[0].articles_count == 4
+        assert events[0].sources_count == 4
+        assert events[0].aggregated_at is not None
+
+    @pytest.mark.asyncio
+    async def test_dedupe_failure_falls_back_to_two_events(self, db):
+        """同批判重判定层不可用 → 按新事件处理，与 B 的失败语义一致。"""
+        self._four_articles(db)
+        pipeline = self._mocked(AIPipeline(db))
+        calls = {"n": 0}
+
+        async def route_side_effect(items, candidates):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                return [RouteDecision(key=it.key, event_id=None) for it in items]
+            return None
+
+        pipeline.router.route = AsyncMock(side_effect=route_side_effect)
+
+        await pipeline.run(max_articles=100)
+
+        db.expire_all()
+        assert db.query(HotEvent).count() == 2
+
+    @pytest.mark.asyncio
+    async def test_llm_new_event_still_creates_separately(self, db):
+        """同批两簇确属不同事件（LLM 判 null）→ 照常建两个，不许误并。"""
+        self._four_articles(db)
+        pipeline = self._mocked(AIPipeline(db))
+        pipeline.router.route = AsyncMock(
+            side_effect=lambda items, candidates: [
+                RouteDecision(key=it.key, event_id=None) for it in items
+            ]
+        )
+
+        await pipeline.run(max_articles=100)
+
+        db.expire_all()
+        assert db.query(HotEvent).count() == 2
+
+
+class TestSelfHealMerge:
+    """自愈判重：标题不等但同一事件的存量重复，LLM 判定后合并。"""
+
+    def _two_events(self, db):
+        now = _now()
+        keep_arts = [
+            Article(title=f"长标题报道{i}", url=f"http://k/{i}", source_name=f"s{i}",
+                    fetched_at=now)
+            for i in range(2)
+        ]
+        dup_arts = [
+            Article(title=f"短标题报道{i}", url=f"http://d/{i}", source_name=f"t{i}",
+                    fetched_at=now)
+            for i in range(2)
+        ]
+        db.add_all(keep_arts + dup_arts)
+        db.flush()
+        keep = HotEvent(
+            title="重庆原市长黄奇帆被查", summary="长", articles_count=2,
+            sources_count=2, first_seen_at=now, last_updated_at=now,
+            embedding_centroid=[1.0, 0.0],
+        )
+        dup = HotEvent(
+            title="黄奇帆被查", summary="短", articles_count=2,
+            sources_count=2, first_seen_at=now, last_updated_at=now,
+            embedding_centroid=[0.99, 0.01],
+        )
+        db.add_all([keep, dup])
+        db.flush()
+        db.add_all(
+            [EventArticle(event_id=keep.id, article_id=a.id) for a in keep_arts]
+            + [EventArticle(event_id=dup.id, article_id=a.id) for a in dup_arts]
+        )
+        db.commit()
+        return keep, dup
+
+    @pytest.mark.asyncio
+    async def test_llm_same_event_merges(self, db):
+        keep, dup = self._two_events(db)
+        pipeline = AIPipeline(db)
+        pipeline.router.route = AsyncMock(
+            return_value=[RouteDecision(key=f"event:{dup.id}", event_id=keep.id)]
+        )
+
+        await pipeline._merge_similar_events()
+
+        db.expire_all()
+        events = db.query(HotEvent).all()
+        assert len(events) == 1
+        assert events[0].id == keep.id
+        assert events[0].articles_count == 4
+        assert events[0].sources_count == 4
+
+    @pytest.mark.asyncio
+    async def test_llm_different_events_kept(self, db):
+        """同话题不同事件（LLM 判 null）不能被合并。"""
+        keep, dup = self._two_events(db)
+        pipeline = AIPipeline(db)
+        pipeline.router.route = AsyncMock(
+            return_value=[RouteDecision(key=f"event:{dup.id}", event_id=None)]
+        )
+
+        await pipeline._merge_similar_events()
+
+        db.expire_all()
+        assert db.query(HotEvent).count() == 2
+
+    @pytest.mark.asyncio
+    async def test_router_down_skips_merge(self, db):
+        self._two_events(db)
+        pipeline = AIPipeline(db)
+        pipeline.router.route = AsyncMock(return_value=None)
+
+        await pipeline._merge_similar_events()
+
+        db.expire_all()
+        assert db.query(HotEvent).count() == 2
+
+    def test_candidate_pairs_recall(self, db):
+        """召回口径：标题包含对 + 新生事件高相似对；老事件高相似不进判定。"""
+        now = _now()
+        old = now - timedelta(hours=72)
+        contain_keep = HotEvent(title="重庆原市长黄奇帆被查", articles_count=3,
+                                sources_count=3, first_seen_at=old, last_updated_at=now,
+                                embedding_centroid=[1.0, 0.0])
+        contain_dup = HotEvent(title="黄奇帆被查", articles_count=3,
+                               sources_count=3, first_seen_at=old, last_updated_at=now,
+                               embedding_centroid=[0.0, 1.0])
+        young_a = HotEvent(title="年轻甲", articles_count=1, sources_count=1,
+                           first_seen_at=now, last_updated_at=now,
+                           embedding_centroid=[0.7, 0.7])
+        young_b = HotEvent(title="年轻乙", articles_count=1, sources_count=1,
+                           first_seen_at=now, last_updated_at=now,
+                           embedding_centroid=[0.7, 0.71])
+        old_a = HotEvent(title="年老甲", articles_count=1, sources_count=1,
+                         first_seen_at=old, last_updated_at=now,
+                         embedding_centroid=[0.3, 0.3])
+        old_b = HotEvent(title="年老乙", articles_count=1, sources_count=1,
+                         first_seen_at=old, last_updated_at=now,
+                         embedding_centroid=[0.3, 0.31])
+        db.add_all([contain_keep, contain_dup, young_a, young_b, old_a, old_b])
+        db.commit()
+
+        pairs = AIPipeline(db)._merge_candidate_pairs(
+            [contain_keep, contain_dup, young_a, young_b, old_a, old_b]
+        )
+        got = {(keep.id, dup.id) for keep, dup in pairs}
+
+        # 标题包含对：两向量正交（相似度 0）也必须被召回
+        assert (contain_keep.id, contain_dup.id) in got
+        # 新生事件高相似对
+        assert (young_a.id, young_b.id) in got or (young_b.id, young_a.id) in got
+        # 老事件之间的高相似对（含标题包含对以外的）不进判定
+        assert (old_a.id, old_b.id) not in got

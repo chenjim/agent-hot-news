@@ -30,7 +30,7 @@ docker compose logs -f backend
 
 ## 重要约定
 
-- Redis 仅用于 `backend/app/cache/` 中的 API 响应缓存装饰器（`@cache_response(ttl=60)`）。
+- Redis 用于两处：`backend/app/cache/` 的 API 响应缓存装饰器（`@cache_response(ttl=60)`），以及 `app/utils/url_probe.py` 的来源链接可浏览性结论（`probe:url:<sha1>`，成功 24h / 失败 2h）。
 - PostgreSQL + pgvector 存储向量嵌入，支持 HNSW 索引加速相似度搜索。
 - **前端是生产构建**：`frontend/Dockerfile` 多阶段（`npm run build` → nginx 托管 `dist/` + 反代 `/api`）。
   改前端代码或改 `READ_TOKEN` 后必须重建，`docker compose restart frontend` 无效：

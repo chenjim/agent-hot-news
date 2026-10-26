@@ -134,6 +134,76 @@ class TestHotEventsAPI:
         assert data["sources"][0]["name"] == "Source A"
         assert data["sources"][0]["url"] == "http://example.com/1"
 
+    def test_get_hot_event_detail_does_not_block_on_probe(self, client, db, monkeypatch):
+        """详情接口只读探测缓存、后台预热，请求内不再等网络探测。"""
+        from app.api.v1.endpoints import hot_events as hot_events_module
+
+        warmed = []
+
+        async def fake_probe_cache(urls):
+            return {}
+
+        def fake_warm(urls):
+            warmed.extend(urls)
+
+        monkeypatch.setattr(hot_events_module, "get_probe_cache", fake_probe_cache)
+        monkeypatch.setattr(hot_events_module, "warm", fake_warm)
+
+        now = datetime.now(timezone.utc)
+        event = HotEvent(
+            title="Fast Event", summary="S", category="__probe_test__",
+            hot_score=10.0, last_updated_at=now,
+        )
+        db.add(event)
+        db.flush()
+        article = Article(
+            title="A", url="https://example.com/a", source_name="Source A",
+            source_url="http://source-a.com", published_at=now, raw_hot_score=1.0,
+        )
+        db.add(article)
+        db.flush()
+        db.add(EventArticle(event_id=event.id, article_id=article.id))
+        db.commit()
+
+        response = client.get(f"/api/v1/hot-events/{event.id}")
+        assert response.status_code == 200
+        data = response.json()
+        # 未命中缓存时按「是 http 就算可用」兜底，同时丢给后台预热
+        assert data["sources"][0]["browsable"] is True
+        assert "https://example.com/a" in warmed
+
+    def test_get_hot_event_detail_respects_cached_probe(self, client, db, monkeypatch):
+        """Redis/内存里已有「不可浏览」结论时，详情接口直接采用。"""
+        from app.api.v1.endpoints import hot_events as hot_events_module
+
+        async def fake_probe_cache(urls):
+            return {"https://example.com/dead": False}
+
+        warmed = []
+        monkeypatch.setattr(hot_events_module, "get_probe_cache", fake_probe_cache)
+        monkeypatch.setattr(hot_events_module, "warm", warmed.extend)
+
+        now = datetime.now(timezone.utc)
+        event = HotEvent(
+            title="Dead Link Event", summary="S", category="__probe_test__",
+            hot_score=10.0, last_updated_at=now,
+        )
+        db.add(event)
+        db.flush()
+        article = Article(
+            title="A", url="https://example.com/dead", source_name="Source A",
+            source_url="http://source-a.com", published_at=now, raw_hot_score=1.0,
+        )
+        db.add(article)
+        db.flush()
+        db.add(EventArticle(event_id=event.id, article_id=article.id))
+        db.commit()
+
+        response = client.get(f"/api/v1/hot-events/{event.id}")
+        assert response.status_code == 200
+        assert response.json()["sources"][0]["browsable"] is False
+        assert warmed == ["https://example.com/dead"]  # 结论已有，真实 warm 会跳过
+
     def test_get_hot_event_not_found(self, client):
         response = client.get("/api/v1/hot-events/9999")
         assert response.status_code == 404

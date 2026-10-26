@@ -1,4 +1,5 @@
 import os
+import re
 
 # Must set before any app imports so settings use test values
 # 注意必须是赋值而不是 setdefault：容器/CI 里 DATABASE_URL 是已存在的环境变量，
@@ -9,6 +10,10 @@ os.environ.setdefault("OPENAI_API_KEY", "test-key")
 # Token 鉴权测试用固定值（优先级高于项目根 .env）
 os.environ["READ_TOKEN"] = "test-read-token"
 os.environ["WRITE_TOKEN"] = "test-write-token"
+# 缓存隔离：默认 REDIS_URL 直接指向生产实例，测试写的 key 会进线上缓存，
+# 统一改到 15 号库（宿主机 localhost / 容器内 redis 都适用）。
+_REDIS_URL = os.environ.get("REDIS_URL", "redis://localhost:51179/0")
+os.environ["REDIS_URL"] = re.sub(r"/\d+$", "/15", _REDIS_URL)
 
 import asyncio
 import pytest

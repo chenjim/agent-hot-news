@@ -1,8 +1,10 @@
+# 开机自启：restart 刻意为 "no" —— dockerd 开机会把带策略的容器一波并行恢复，
+# 全机容器统一由宿主 ~/.local/bin/containers-stagger.sh（root crontab @reboot）自动分批拉起
 services:
   redis:
     image: redis:7.4.8-alpine
     container_name: hotnews-redis
-    restart: always
+    restart: "no"
     ports:
       - "51179:6379"
     volumes:
@@ -16,7 +18,7 @@ services:
   postgres:
     image: pgvector/pgvector:pg17
     container_name: hotnews-postgres
-    restart: always
+    restart: "no"
     ports:
       - "51132:5432"
     volumes:
@@ -41,7 +43,7 @@ services:
         HTTPS_PROXY: ${HTTPS_PROXY-http://192.168.31.165:7890}
         PIP_INDEX_URL: ${PIP_INDEX_URL-https://pypi.tuna.tsinghua.edu.cn/simple}
     container_name: hotnews-backend
-    restart: always
+    restart: "no"
     extra_hosts:
       - "host.docker.internal:host-gateway"
     ports:
@@ -86,7 +88,7 @@ services:
         VITE_READ_TOKEN: ${READ_TOKEN-}
         VITE_API_URL: /api/v1
     container_name: hotnews-frontend
-    restart: always
+    restart: "no"
     mem_limit: 1g
     mem_reservation: 512m
     ports:
