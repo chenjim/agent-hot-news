@@ -51,17 +51,6 @@ export default function HomePage() {
       <Header />
 
       <main className="container mx-auto px-4 py-8">
-        {/* Hero section */}
-        <section className="mb-8">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="mt-2 text-muted-foreground">
-                AI 实时聚合 {events.length} 个正在发酵的热点事件
-              </p>
-            </div>
-          </div>
-        </section>
-
         {/* Category filter */}
         <section className="mb-6">
           <CategoryFilter active={category} onChange={setCategory} />

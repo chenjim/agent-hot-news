@@ -19,6 +19,9 @@ export default function Header() {
           <Link to="/" className="text-xl font-bold tracking-tight hover:opacity-80 transition-opacity">
             今日热点
           </Link>
+          <p className="hidden text-sm text-muted-foreground sm:block">
+            AI实时聚合热点事件
+          </p>
         </div>
 
         <div className="flex items-center gap-3">

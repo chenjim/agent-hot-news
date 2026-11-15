@@ -52,6 +52,24 @@ class RSSCollector(BaseCollector):
 
         parsed = feedparser.parse(response.content)
 
+        if not parsed.entries:
+            # 0 条要区分「合法空 feed」和「拿到的根本不是 feed」：
+            # 反爬/验证页常见表现就是 HTTP 200 + text/html，feedparser 解析出
+            # 0 条（有时 bozo 也不置位），若不报错就会永远显示「正常但 0 条」。
+            content_type = str(response.headers.get("content-type") or "").lower()
+            is_html = "text/html" in content_type
+            if parsed.bozo or is_html:
+                raise Exception(
+                    f"RSS feed invalid for {self.name}: 0 entries, "
+                    f"content-type={content_type or 'unknown'}, "
+                    f"bytes={len(response.content)}, "
+                    f"parse error: {parsed.get('bozo_exception')}"
+                )
+            logger.warning(
+                f"[{self.name}] RSS feed returned 0 entries "
+                f"(content-type={content_type or 'unknown'})"
+            )
+
         for entry in parsed.entries:
             # Parse published date
             published = None

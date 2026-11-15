@@ -73,8 +73,16 @@ export default function SourceTable({ sources, isLoading }: SourceTableProps) {
                       <span className="text-muted-foreground">
                         {formatRelativeTime(source.last_fetched_at)}
                       </span>
-                      {source.fetched_today != null && source.fetched_today > 0 && (
-                        <span className="ml-2 rounded-full bg-primary/10 px-2 py-0.5 text-xs text-primary">
+                      {source.fetched_today != null && (
+                        <span
+                          className={cn(
+                            'ml-2 rounded-full px-2 py-0.5 text-xs',
+                            source.fetched_today > 0
+                              ? 'bg-primary/10 text-primary'
+                              : 'bg-muted text-muted-foreground',
+                          )}
+                          title="今日已采集条数"
+                        >
                           +{source.fetched_today}
                         </span>
                       )}

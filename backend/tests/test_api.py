@@ -246,6 +246,56 @@ class TestSeedSources:
         assert existing.config.get("proxy") == "http://127.0.0.1:7890"
         assert "headers" in existing.config
 
+    def test_seed_migrates_zhihu_endpoint(self, db):
+        """老库 zhihu 指向需要登录态的 www.zhihu.com/api/v3，seed 要迁到匿名接口。"""
+        from app.seed import seed_sources, ZHIHU_ENDPOINT
+
+        existing = Source(
+            name="zhihu",
+            type=SourceType.API,
+            endpoint="https://www.zhihu.com/api/v3/feed/topstory/hot-lists/total?limit=50",
+            config={"language": "zh"},
+        )
+        db.add(existing)
+        db.commit()
+
+        seed_sources(db)
+        db.refresh(existing)
+        assert existing.endpoint == ZHIHU_ENDPOINT
+
+
+class TestSourceFetchEndpoint:
+    def test_manual_fetch_clears_error_state(self, client, db, monkeypatch):
+        """手工补采成功后要把 ERROR/last_error 清掉，否则界面一直是红的状态。"""
+        from app.collectors.manager import CollectorManager
+        from app.ai_pipeline.article_summarizer import ArticleSummarizer
+
+        src = Source(
+            name="__fetch_test__",
+            type=SourceType.API,
+            endpoint="http://example.com/api",
+            status=SourceStatus.ERROR,
+            last_error="401 Authorization Required",
+        )
+        db.add(src)
+        db.commit()
+
+        class _StubCollector:
+            async def fetch(self):
+                return []
+
+        async def _noop_process(self, articles, is_known=None):
+            return articles
+
+        monkeypatch.setattr(CollectorManager, "create_collector", lambda self, s: _StubCollector())
+        monkeypatch.setattr(ArticleSummarizer, "process", _noop_process)
+
+        response = client.post(f"/api/v1/sources/{src.id}/fetch")
+        assert response.status_code == 200
+        db.refresh(src)
+        assert src.status == SourceStatus.ACTIVE
+        assert src.last_error is None
+
 
 class TestSourcesAPI:
     def test_create_source(self, client):

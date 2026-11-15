@@ -12,6 +12,7 @@ from app.collectors.hackernews_collector import HackerNewsCollector
 from app.collectors.baidu_hot_collector import BaiduHotCollector
 from app.collectors.google_news_collector import GoogleNewsCollector
 from app.collectors.toutiao_hot_collector import ToutiaoHotCollector
+from app.collectors.kr36_collector import Kr36Collector
 from app.models.models import Source, SourceType, SourceStatus, Article
 from sqlalchemy.orm import Session
 
@@ -38,6 +39,7 @@ NAME_COLLECTOR_MAP: Dict[str, Type[BaseCollector]] = {
     "Hacker News": HackerNewsCollector,
     "baidu_hot": BaiduHotCollector,
     "google_news": GoogleNewsCollector,
+    "36氪": Kr36Collector,
 }
 
 

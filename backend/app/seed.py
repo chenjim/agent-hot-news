@@ -18,12 +18,22 @@ _DEFAULT_PROXY = (
     or None
 )
 
+# 36氪官网 RSS（https://36kr.com/feed）已失效，返回反爬 HTML 解析 0 条，
+# 统一改走网页端快讯网关接口。
+KR36_ENDPOINT = "https://gateway.36kr.com/api/mis/nav/newsflash/flow"
+
+# 知乎热榜：www.zhihu.com/api/v3 那条必须登录态，cookie 一过期就 401
+# （ERR_TICKET_NOT_EXIST）；api.zhihu.com 这条匿名可访问，返回结构一致。
+ZHIHU_ENDPOINT = "https://api.zhihu.com/topstory/hot-lists/total?limit=50"
+
 
 DEFAULT_SOURCES = [
     {
         "name": "36氪",
-        "type": SourceType.RSS,
-        "endpoint": "https://36kr.com/feed",
+        # 官网 RSS 已失效（返回反爬 HTML，解析 0 条），改走快讯网关接口，
+        # 采集器由 NAME_COLLECTOR_MAP 映射到 Kr36Collector。
+        "type": SourceType.API,
+        "endpoint": KR36_ENDPOINT,
         "config": {"language": "zh"},
     },
     {
@@ -66,7 +76,7 @@ DEFAULT_SOURCES = [
     {
         "name": "zhihu",
         "type": SourceType.API,
-        "endpoint": "https://www.zhihu.com/api/v3/feed/topstory/hot-lists/total?limit=50",
+        "endpoint": ZHIHU_ENDPOINT,
         "config": {"language": "zh"},
     },
     {
@@ -166,6 +176,21 @@ def seed_sources(engine_or_db):
         existing = {s.name: s for s in db.query(Source).all()}
         added = 0
         updated = 0
+
+        # 老库里的 36氪 仍指向已失效的官网 RSS，把类型和 endpoint 一起迁移过来
+        kr36 = existing.get("36氪")
+        if kr36 and (kr36.type != SourceType.API or kr36.endpoint != KR36_ENDPOINT):
+            kr36.type = SourceType.API
+            kr36.endpoint = KR36_ENDPOINT
+            updated += 1
+
+        # 老库里的 zhihu 仍指向需要登录态的 www.zhihu.com/api/v3，换成可匿名访问的接口
+        zhihu = existing.get("zhihu")
+        if zhihu and zhihu.endpoint != ZHIHU_ENDPOINT:
+            zhihu.type = SourceType.API
+            zhihu.endpoint = ZHIHU_ENDPOINT
+            updated += 1
+
         for src_data in DEFAULT_SOURCES:
             source = existing.get(src_data["name"])
             if source is None:

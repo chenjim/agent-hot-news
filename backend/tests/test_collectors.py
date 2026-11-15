@@ -14,6 +14,7 @@ from app.collectors.juejin_collector import JuejinCollector
 from app.collectors.zhihu_collector import ZhihuCollector
 from app.collectors.weibo_hot_collector import WeiboHotCollector
 from app.collectors.tianapi_collector import TianapiCollector
+from app.collectors.kr36_collector import Kr36Collector
 from app.models.models import Source, SourceType, SourceStatus, Article
 
 
@@ -114,6 +115,27 @@ class TestRSSCollector:
 
         with patch("app.collectors.rss_collector.httpx.AsyncClient", return_value=mock_client):
             with pytest.raises(Exception, match="RSS fetch failed for Bad RSS"):
+                await collector.fetch()
+
+    @pytest.mark.asyncio
+    async def test_fetch_rss_anti_bot_html_raises(self):
+        """HTTP 200 + 反爬 HTML 页（如 36氪 feed）必须报错，不能静默返回 0 条。"""
+        html = b"<!DOCTYPE html><html><body>verify you are human</body></html>"
+
+        mock_response = MagicMock()
+        mock_response.content = html
+        mock_response.headers = {"content-type": "text/html"}
+        mock_response.raise_for_status = MagicMock()
+
+        mock_client = AsyncMock()
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+        mock_client.get = AsyncMock(return_value=mock_response)
+
+        collector = RSSCollector({"name": "Bot RSS", "endpoint": "http://example.com/feed"})
+
+        with patch("app.collectors.rss_collector.httpx.AsyncClient", return_value=mock_client):
+            with pytest.raises(Exception, match="RSS feed invalid for Bot RSS"):
                 await collector.fetch()
 
 
@@ -807,12 +829,11 @@ class TestZhihuCollector:
         mock_client.get = AsyncMock(return_value=mock_response)
 
         collector = ZhihuCollector(
-            {"name": "zhihu", "endpoint": "https://www.zhihu.com/api/v3/feed/topstory/hot-lists/total?limit=50", "config": {"language": "zh"}}
+            {"name": "zhihu", "endpoint": "https://api.zhihu.com/topstory/hot-lists/total?limit=50", "config": {"language": "zh"}}
         )
 
         with patch("app.collectors.zhihu_collector.httpx.AsyncClient", return_value=mock_client):
-            with patch("app.utils.cookies.load_cookie", return_value="test=1"):
-                articles = await collector.fetch()
+            articles = await collector.fetch()
 
         assert len(articles) == 2
         assert articles[0].title == "Question 1"
@@ -821,6 +842,118 @@ class TestZhihuCollector:
         assert articles[0].extra["hot_text"] == "1369 万热度"
         assert articles[1].raw_hot_score == 5000.0
         assert articles[1].url == "https://www.zhihu.com/question/2"
+
+    @pytest.mark.asyncio
+    async def test_fetch_zhihu_converts_api_urls_to_web(self):
+        """热榜 target.url 是 api.zhihu.com 的 API 地址，必须还原为网页链接。"""
+        api_data = {
+            "data": [
+                {
+                    "target": {
+                        "id": 2104704747362054197,
+                        "type": "question",
+                        "title": "Question API",
+                        "url": "https://api.zhihu.com/questions/2104704747362054197",
+                    },
+                    "detail_text": "123 万热度",
+                },
+                {
+                    "target": {
+                        "id": 456,
+                        "type": "answer",
+                        "title": "Answer API",
+                        "url": "https://api.zhihu.com/answers/456",
+                    },
+                    "detail_text": "10 万热度",
+                },
+                {
+                    "target": {
+                        "id": 789,
+                        "type": "article",
+                        "title": "Article API",
+                        "url": "https://api.zhihu.com/articles/789",
+                    },
+                    "detail_text": "1 万热度",
+                },
+                {
+                    # url 缺失时按 type + id 兜底
+                    "target": {"id": 321, "type": "question", "title": "No URL"},
+                    "detail_text": "1 万热度",
+                },
+            ]
+        }
+
+        mock_response = MagicMock()
+        mock_response.json = lambda: api_data
+        mock_response.raise_for_status = MagicMock()
+
+        mock_client = AsyncMock()
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+        mock_client.get = AsyncMock(return_value=mock_response)
+
+        collector = ZhihuCollector(
+            {"name": "zhihu", "endpoint": "https://api.zhihu.com/topstory/hot-lists/total?limit=50", "config": {"language": "zh"}}
+        )
+
+        with patch("app.collectors.zhihu_collector.httpx.AsyncClient", return_value=mock_client):
+            articles = await collector.fetch()
+
+        assert [a.url for a in articles] == [
+            "https://www.zhihu.com/question/2104704747362054197",
+            "https://www.zhihu.com/answer/456",
+            "https://zhuanlan.zhihu.com/p/789",
+            "https://www.zhihu.com/question/321",
+        ]
+
+    @pytest.mark.asyncio
+    async def test_fetch_zhihu_sends_no_cookie_by_default(self):
+        """过期 cookie 会让 api.zhihu.com 直接 401，默认必须不发送。"""
+        mock_response = MagicMock()
+        mock_response.json = lambda: {"data": []}
+        mock_response.raise_for_status = MagicMock()
+
+        mock_client = AsyncMock()
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+        mock_client.get = AsyncMock(return_value=mock_response)
+
+        collector = ZhihuCollector(
+            {"name": "zhihu", "endpoint": "https://api.zhihu.com/topstory/hot-lists/total?limit=50", "config": {"language": "zh"}}
+        )
+
+        with patch("app.collectors.zhihu_collector.httpx.AsyncClient", return_value=mock_client):
+            with patch("app.collectors.zhihu_collector.load_cookie", return_value="z_c0=expired") as loader:
+                await collector.fetch()
+
+        loader.assert_not_called()
+        assert "Cookie" not in mock_client.get.call_args.kwargs["headers"]
+
+    @pytest.mark.asyncio
+    async def test_fetch_zhihu_use_cookie_flag(self):
+        """config.use_cookie 打开时才附带 cookie.zhihu.txt。"""
+        mock_response = MagicMock()
+        mock_response.json = lambda: {"data": []}
+        mock_response.raise_for_status = MagicMock()
+
+        mock_client = AsyncMock()
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+        mock_client.get = AsyncMock(return_value=mock_response)
+
+        collector = ZhihuCollector(
+            {
+                "name": "zhihu",
+                "endpoint": "https://api.zhihu.com/topstory/hot-lists/total?limit=50",
+                "config": {"language": "zh", "use_cookie": True},
+            }
+        )
+
+        with patch("app.collectors.zhihu_collector.httpx.AsyncClient", return_value=mock_client):
+            with patch("app.collectors.zhihu_collector.load_cookie", return_value="z_c0=fresh"):
+                await collector.fetch()
+
+        assert mock_client.get.call_args.kwargs["headers"]["Cookie"] == "z_c0=fresh"
 
 
 class TestWeiboHotCollector:
@@ -971,3 +1104,101 @@ class TestTianapiCollector:
             with patch("app.collectors.tianapi_collector.get_settings", return_value=mock_settings):
                 with pytest.raises(Exception, match="API limit exceeded"):
                     await collector.fetch()
+
+
+class TestKr36Collector:
+    @pytest.mark.asyncio
+    async def test_fetch_newsflash_success(self):
+        api_data = {
+            "code": 0,
+            "data": {
+                "itemList": [
+                    {
+                        "itemId": 111,
+                        "itemType": 20,
+                        "templateMaterial": {
+                            "itemId": 111,
+                            "publishTime": 1700000000000,
+                            "widgetTitle": "快讯一",
+                            "widgetContent": "快讯一的内容",
+                        },
+                    },
+                    {
+                        "itemId": 222,
+                        "itemType": 20,
+                        "templateMaterial": {
+                            "itemId": 222,
+                            "publishTime": 1700000100000,
+                            "widgetTitle": "",  # 空标题应跳过
+                            "widgetContent": "无标题",
+                        },
+                    },
+                    {
+                        "itemId": 333,
+                        "itemType": 20,
+                        "templateMaterial": {
+                            "itemId": 333,
+                            "widgetTitle": "快讯三",
+                            "widgetContent": "快讯三的内容",
+                        },
+                    },
+                ]
+            },
+        }
+
+        mock_response = MagicMock()
+        mock_response.json = MagicMock(return_value=api_data)
+        mock_response.raise_for_status = MagicMock()
+
+        mock_client = AsyncMock()
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+        mock_client.post = AsyncMock(return_value=mock_response)
+
+        collector = Kr36Collector(
+            {"name": "36氪", "endpoint": "https://gateway.36kr.com/api/mis/nav/newsflash/flow", "config": {"language": "zh"}}
+        )
+
+        with patch("app.collectors.kr36_collector.httpx.AsyncClient", return_value=mock_client):
+            articles = await collector.fetch()
+
+        assert len(articles) == 2
+        assert articles[0].title == "快讯一"
+        assert articles[0].url == "https://36kr.com/detail_newsflash?itemId=111"
+        assert articles[0].summary == "快讯一的内容"
+        assert articles[0].published_at == datetime(2023, 11, 14, 22, 13, 20, tzinfo=timezone.utc)
+        assert articles[1].title == "快讯三"
+
+    @pytest.mark.asyncio
+    async def test_fetch_newsflash_api_error_raises(self):
+        mock_response = MagicMock()
+        mock_response.json = MagicMock(return_value={"code": 10, "msg": "系统异常"})
+        mock_response.raise_for_status = MagicMock()
+
+        mock_client = AsyncMock()
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+        mock_client.post = AsyncMock(return_value=mock_response)
+
+        collector = Kr36Collector({"name": "36氪", "endpoint": "http://x", "config": {}})
+
+        with patch("app.collectors.kr36_collector.httpx.AsyncClient", return_value=mock_client):
+            with pytest.raises(Exception, match="36kr newsflash API error"):
+                await collector.fetch()
+
+    @pytest.mark.asyncio
+    async def test_fetch_newsflash_empty_raises(self):
+        mock_response = MagicMock()
+        mock_response.json = MagicMock(return_value={"code": 0, "data": {"itemList": []}})
+        mock_response.raise_for_status = MagicMock()
+
+        mock_client = AsyncMock()
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+        mock_client.post = AsyncMock(return_value=mock_response)
+
+        collector = Kr36Collector({"name": "36氪", "endpoint": "http://x", "config": {}})
+
+        with patch("app.collectors.kr36_collector.httpx.AsyncClient", return_value=mock_client):
+            with pytest.raises(Exception, match="returned 0 items"):
+                await collector.fetch()

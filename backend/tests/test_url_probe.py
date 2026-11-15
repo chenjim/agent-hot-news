@@ -134,6 +134,59 @@ class TestProbeRedisCache:
         assert url_probe._warming == set()
 
 
+class TestTrustedHosts:
+    @pytest.fixture(autouse=True)
+    def _clean_memory_cache(self):
+        url_probe._cache.clear()
+        yield
+        url_probe._cache.clear()
+
+    def test_is_trusted_url(self):
+        assert url_probe.is_trusted_url("https://www.zhihu.com/question/1")
+        assert url_probe.is_trusted_url("https://zhuanlan.zhihu.com/p/1")
+        assert url_probe.is_trusted_url("https://zhihu.com/question/1")
+        # 只认完整域名后缀，防 evilzhihu.com 之类误命中
+        assert not url_probe.is_trusted_url("https://evilzhihu.com/question/1")
+        assert not url_probe.is_trusted_url("https://zhihu.com.evil.com/q/1")
+        assert not url_probe.is_trusted_url("tianapi://zhihu.com/x")
+
+    @pytest.mark.asyncio
+    async def test_zhihu_skips_probe_and_overwrites_stale_false(self, monkeypatch):
+        """知乎对机房 IP 返回 403，但浏览器可打开：不能探测，且要覆盖旧的 false 结论。"""
+        fake = TestProbeRedisCache.FakeRedis()
+        monkeypatch.setattr(url_probe, "get_redis_client", lambda: fake)
+
+        async def must_not_probe(url):
+            raise AssertionError("白名单域名不应发起探测")
+
+        monkeypatch.setattr(url_probe, "_probe", must_not_probe)
+
+        url = "https://www.zhihu.com/question/2104704747362054197"
+        key = url_probe._redis_key(url)
+        fake.data[key] = "0"  # 修复前遗留的失败结论
+
+        assert await url_probe.is_browsable(url) is True
+        assert fake.data[key] == "1"
+
+        # 即使 Redis 仍是旧值，详情接口读缓存也必须返回可浏览
+        fake.data[key] = "0"
+        url_probe._cache.clear()
+        assert await url_probe.get_probe_cache([url]) == {url: True}
+
+    @pytest.mark.asyncio
+    async def test_get_probe_cache_trusted_wins_over_cached_false(self, monkeypatch):
+        url_probe._cache["https://www.zhihu.com/question/2"] = (False, float("inf"))
+
+        async def must_not_probe(url):
+            raise AssertionError("白名单域名不应发起探测")
+
+        monkeypatch.setattr(url_probe, "_probe", must_not_probe)
+
+        assert await url_probe.get_probe_cache(
+            ["https://www.zhihu.com/question/2"]
+        ) == {"https://www.zhihu.com/question/2": True}
+
+
 class TestHelpers:
     def test_is_browser_url(self):
         assert url_probe.is_browser_url("https://example.com/a")

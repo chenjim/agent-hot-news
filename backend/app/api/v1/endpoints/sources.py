@@ -105,8 +105,10 @@ async def trigger_source_fetch(
         )
         new_count = manager.save_articles(articles, existing=existing)
 
-        # Update source timestamp
+        # Update source timestamp；顺手把 ERROR 状态清掉，否则手工补采成功也一直显示红色
         source.last_fetched_at = datetime.now(timezone.utc)
+        source.status = SourceStatus.ACTIVE
+        source.last_error = None
         db.commit()
 
         _append_log("fetch_task", "success", f"Source {source.name}: {new_count} new articles")

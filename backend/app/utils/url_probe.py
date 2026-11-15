@@ -3,6 +3,7 @@
 判定规则
 --------
 * 非 http(s)（如 ``tianapi://`` 伪 URL、空值）→ 不可浏览
+* 反爬白名单域名（``TRUSTED_HOSTS``，如知乎）→ 直接判可浏览，不探测
 * http(s) → 真实发起一次请求探测：
   - 状态码 < 400 且 content-type 是 html/text → 可浏览
   - 4xx/5xx、超时、非 html（JSON API 链接）→ 不可浏览
@@ -42,6 +43,10 @@ _UA = (
     "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 )
 
+# 对机房 IP 一律返回 403/412 反爬、但访客浏览器能正常打开的站点。
+# 这些域名不做网络探测，直接视为可浏览，避免被错误降级到搜索兜底。
+TRUSTED_HOSTS = ("zhihu.com",)
+
 # url -> (browsable, expires_at)
 _cache: Dict[str, Tuple[bool, float]] = {}
 _sem = asyncio.Semaphore(CONCURRENCY)
@@ -52,6 +57,14 @@ _warm_tasks: set = set()
 
 def is_browser_url(url: Optional[str]) -> bool:
     return bool(url) and (url.startswith("http://") or url.startswith("https://"))
+
+
+def is_trusted_url(url: Optional[str]) -> bool:
+    """命中反爬白名单（不做探测，直接判可浏览）。"""
+    if not is_browser_url(url):
+        return False
+    host = (httpx.URL(url or "").host or "").lower()
+    return any(host == d or host.endswith("." + d) for d in TRUSTED_HOSTS)
 
 
 def bing_fallback(title: str) -> str:
@@ -178,6 +191,12 @@ async def is_browsable(url: Optional[str]) -> bool:
         return False
     target = url or ""
 
+    # 反爬白名单直接判可用，并覆盖旧的探测结论
+    if is_trusted_url(target):
+        _cache[target] = (True, time.time() + OK_TTL)
+        await _save_to_redis(target, True)
+        return True
+
     hit = _cached(target)
     if hit is not None:
         return hit
@@ -209,6 +228,9 @@ async def get_probe_cache(urls: list) -> Dict[str, bool]:
     result: Dict[str, bool] = {}
     missing = []
     for url in {u for u in urls if is_browser_url(u)}:
+        if is_trusted_url(url):
+            result[url] = True
+            continue
         hit = _cached(url)
         if hit is None:
             missing.append(url)

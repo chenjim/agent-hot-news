@@ -32,6 +32,7 @@ docker compose logs -f backend
 
 - Redis 用于两处：`backend/app/cache/` 的 API 响应缓存装饰器（`@cache_response(ttl=60)`），以及 `app/utils/url_probe.py` 的来源链接可浏览性结论（`probe:url:<sha1>`，成功 24h / 失败 2h）。
 - PostgreSQL + pgvector 存储向量嵌入，支持 HNSW 索引加速相似度搜索。
+- 知乎热榜走 `api.zhihu.com/topstory/hot-lists/total`（匿名可访问）；老的 `www.zhihu.com/api/v3/feed/topstory/hot-lists/total` 要登录态，`cookie.zhihu.txt` 里的 `z_c0` 一过期就 401 `ERR_TICKET_NOT_EXIST`，且附上过期 cookie 反而必失败，故采集器默认不发 cookie（需要时在 source.config 开 `use_cookie`）。
 - **前端是生产构建**：`frontend/Dockerfile` 多阶段（`npm run build` → nginx 托管 `dist/` + 反代 `/api`）。
   改前端代码或改 `READ_TOKEN` 后必须重建，`docker compose restart frontend` 无效：
   `docker compose build frontend && docker compose up -d frontend`。读令牌在构建期烧进 JS
